@@ -4,9 +4,11 @@
 # network_mode: host e scopre i container via label Docker sulla rete di default del progetto —
 # non serve nessuna rete esterna condivisa, a differenza di quanto ipotizzato in una prima bozza.
 #
-# I build context puntano al repository Git pubblico (BuildKit clona ed esegue la build da lì) —
-# così il deploy funziona chiamando l'API Hostinger con questo file come contenuto letterale,
-# senza bisogno di caricare i sorgenti sulla VPS.
+# L'API di deploy Hostinger (VPS_createNewProjectV1) esegue solo `docker compose pull` + `up`,
+# NON supporta `build:` da Dockerfile/contesto Git (verificato: un primo tentativo con `build:`
+# è fallito con "pull access denied" — ha provato a fare pull dell'immagine per nome invece di
+# buildarla). Le immagini vengono quindi costruite da GitHub Actions
+# (.github/workflows/docker-build.yml) e pubblicate su GHCR — qui si fa solo `image:` + pull.
 #
 # Var d'ambiente attese (iniettate come "environment" del progetto Hostinger, non da un file .env
 # caricato — stesso meccanismo usato da n8n-rito per ${TZ}):
@@ -14,10 +16,7 @@
 
 services:
   web:
-    build:
-      context: https://github.com/Dariodecc/lead-scraper.git
-      dockerfile: Dockerfile
-    image: leadscraper-web:latest
+    image: ghcr.io/dariodecc/lead-scraper-web:latest
     restart: unless-stopped
     ports:
       - "3000"
@@ -39,7 +38,7 @@ services:
   # Esegue lo schema Postgres una tantum ad ogni deploy (prisma db push — niente cronologia
   # migrazioni ancora, verrà introdotta quando lo schema si stabilizza). Si ferma da solo (exit 0).
   migrate:
-    image: leadscraper-web:latest
+    image: ghcr.io/dariodecc/lead-scraper-web:latest
     restart: "no"
     environment:
       DATABASE_URL: postgresql://lead_scraper:${POSTGRES_PASSWORD}@postgres:5432/lead_scraper?schema=public
@@ -48,9 +47,7 @@ services:
       - postgres
 
   worker:
-    build:
-      context: https://github.com/Dariodecc/lead-scraper.git
-      dockerfile: worker/Dockerfile
+    image: ghcr.io/dariodecc/lead-scraper-worker:latest
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://lead_scraper:${POSTGRES_PASSWORD}@postgres:5432/lead_scraper?schema=public
