@@ -25,7 +25,7 @@ jobs:
           context: .
           file: Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/lead-scraper-web:latest
+          tags: ghcr.io/dariodecc/lead-scraper-web:latest
 
   build-worker:
     runs-on: ubuntu-latest
@@ -42,4 +42,4 @@ jobs:
           context: .
           file: worker/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/lead-scraper-worker:latest
+          tags: ghcr.io/dariodecc/lead-scraper-worker:latest
