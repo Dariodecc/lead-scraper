@@ -1,0 +1,266 @@
+// Lead Scraper — schema dati, §8 della Specifica di Progetto v7.0.
+// Tutti i campi di sistema/arricchimento sono colonne fisse su `places`.
+// Solo i campi custom per singola Lista passano da ListAttribute/PlaceCustomValue.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WebsiteStatus {
+  none
+  outdated
+  ok
+}
+
+enum BusinessStatus {
+  operational
+  closed_temporarily
+  closed_permanently
+}
+
+enum EstimatedOpeningWindow {
+  m0_4     @map("0_4m")
+  m4_8     @map("4_8m")
+  m8_12    @map("8_12m")
+  m12_plus @map("12m_plus")
+  unknown
+}
+
+enum EstimationConfidence {
+  low
+  medium
+  high
+}
+
+enum DeliveryStatus {
+  pending
+  delivered
+  failed
+}
+
+enum ListAttributeType {
+  text
+  number
+  currency
+  date
+  boolean
+  select
+  multiselect
+  status
+}
+
+enum SearchFrequency {
+  once
+  weekly
+  monthly
+}
+
+enum SearchStatus {
+  draft
+  active
+  paused
+}
+
+enum SearchRunStatus {
+  running
+  done
+  failed
+}
+
+enum LogLevel {
+  info
+  warning
+  error
+}
+
+enum LogCategory {
+  search_run
+  webhook_delivery
+  google_api
+  system
+}
+
+model List {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  // Mix di colonne fisse di Place e key di ListAttribute, in ordine — §7.2
+  visibleFields Json  @default("[]") @map("visible_fields")
+  // Dati mostrati sulla card nella vista d'insieme — §7.2
+  cardFields    Json  @default("[]") @map("card_fields")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  places      Place[]
+  attributes  ListAttribute[]
+  searches    Search[]
+
+  @@map("lists")
+}
+
+model ListAttribute {
+  id        String            @id @default(uuid()) @db.Uuid
+  listId    String            @map("list_id") @db.Uuid
+  list      List              @relation(fields: [listId], references: [id], onDelete: Cascade)
+  name      String
+  key       String
+  type      ListAttributeType
+  options   Json?
+  position  Int               @default(0)
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+
+  values PlaceCustomValue[]
+
+  @@unique([listId, key])
+  @@map("list_attributes")
+}
+
+model PlaceCustomValue {
+  id              String        @id @default(uuid()) @db.Uuid
+  listAttributeId String        @map("list_attribute_id") @db.Uuid
+  listAttribute   ListAttribute @relation(fields: [listAttributeId], references: [id], onDelete: Cascade)
+  placeId         String        @map("place_id_fk") @db.Uuid
+  place           Place         @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  value           Json
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  @@unique([listAttributeId, placeId])
+  @@map("place_custom_values")
+}
+
+model Place {
+  id      String @id @default(uuid()) @db.Uuid
+  placeId String @unique @map("place_id") // chiave di deduplica, globale — Google Place ID
+
+  businessName String @map("business_name")
+  address      String
+  lat          Decimal @db.Decimal(9, 6)
+  lng          Decimal @db.Decimal(9, 6)
+  phone        String?
+
+  listId String @map("list_id") @db.Uuid
+  list   List   @relation(fields: [listId], references: [id], onDelete: Restrict)
+
+  category String?
+
+  websiteUrl    String?       @map("website_url")
+  websiteStatus WebsiteStatus @default(none) @map("website_status")
+
+  rating      Decimal? @db.Decimal(2, 1)
+  reviewCount Int?     @map("review_count")
+  priceLevel  Int?     @map("price_level")
+
+  businessStatus BusinessStatus? @map("business_status")
+
+  estimatedOpeningWindow EstimatedOpeningWindow @default(unknown) @map("estimated_opening_window")
+  estimationConfidence   EstimationConfidence   @default(low) @map("estimation_confidence")
+  confirmedOpeningDate   DateTime?              @map("confirmed_opening_date") @db.Date
+  earliestReviewDate     DateTime?              @map("earliest_review_date") @db.Date
+  firstSeenAt            DateTime               @default(now()) @map("first_seen_at")
+
+  deliveryStatus        DeliveryStatus @default(pending) @map("delivery_status")
+  deliveryAttempts      Int            @default(0) @map("delivery_attempts")
+  lastDeliveryAttemptAt DateTime?      @map("last_delivery_attempt_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  customValues PlaceCustomValue[]
+  logs         Log[]
+
+  @@index([listId])
+  @@index([deliveryStatus])
+  @@map("places")
+}
+
+model Search {
+  id    String @id @default(uuid()) @db.Uuid
+  title String
+
+  areaPlaceId String  @map("area_place_id")
+  areaLabel   String  @map("area_label")
+  areaLat     Decimal @map("area_lat") @db.Decimal(9, 6)
+  areaLng     Decimal @map("area_lng") @db.Decimal(9, 6)
+  areaRadiusM Int     @map("area_radius_m")
+
+  categoryPlaceType String @map("category_place_type")
+  categoryLabel     String @map("category_label")
+
+  frequency          SearchFrequency
+  scheduleDayOfWeek  Int?      @map("schedule_day_of_week")
+  scheduleDayOfMonth Int?      @map("schedule_day_of_month")
+  scheduleTime       String?   @map("schedule_time") // "HH:mm", fuso Europe/Rome
+  nextRunAt          DateTime? @map("next_run_at")
+
+  listId String? @map("list_id") @db.Uuid
+  list   List?   @relation(fields: [listId], references: [id], onDelete: SetNull)
+
+  outboundWebhookUrl          String? @map("outbound_webhook_url")
+  outboundWebhookSecretEncrypted String? @map("outbound_webhook_secret_encrypted")
+  outboundFields              Json?   @map("outbound_fields") // null = tutti i campi valorizzati
+
+  status    SearchStatus @default(draft)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  runs SearchRun[]
+  logs Log[]
+
+  @@index([status])
+  @@index([nextRunAt])
+  @@map("searches")
+}
+
+model SearchRun {
+  id       String @id @default(uuid()) @db.Uuid
+  searchId String @map("search_id") @db.Uuid
+  search   Search @relation(fields: [searchId], references: [id], onDelete: Cascade)
+
+  isTest         Boolean         @default(false) @map("is_test") // true = da pulsante TEST, comunque esecuzione reale
+  status         SearchRunStatus @default(running)
+  resultsCount   Int             @default(0) @map("results_count")
+  newCount       Int             @default(0) @map("new_count")
+  duplicateCount Int             @default(0) @map("duplicate_count")
+
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  error      String?
+
+  @@index([searchId])
+  @@map("search_runs")
+}
+
+model Log {
+  id       String      @id @default(uuid()) @db.Uuid
+  level    LogLevel
+  category LogCategory
+  message  String
+  payload  Json?
+
+  searchId String? @map("search_id") @db.Uuid
+  search   Search? @relation(fields: [searchId], references: [id], onDelete: SetNull)
+
+  placeId String? @map("place_id_fk") @db.Uuid
+  place   Place?  @relation(fields: [placeId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([level])
+  @@index([category])
+  @@index([createdAt])
+  @@map("logs")
+}
+
+model IntegrationSetting {
+  id             String   @id @default(uuid()) @db.Uuid
+  key            String   @unique
+  valueEncrypted String?  @map("value_encrypted")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("integrations_settings")
+}

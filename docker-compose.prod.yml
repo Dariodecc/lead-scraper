@@ -1,0 +1,101 @@
+# Produzione — VPS Hostinger esistente (srv1344755), dietro il Traefik già in uso da n8n/convertx (§10).
+#
+# Verificato ispezionando i progetti esistenti sul VPS (n8n-rito, traefik-47m4): Traefik gira in
+# network_mode: host e scopre i container via label Docker sulla rete di default del progetto —
+# non serve nessuna rete esterna condivisa, a differenza di quanto ipotizzato in una prima bozza.
+#
+# I build context puntano al repository Git pubblico (BuildKit clona ed esegue la build da lì) —
+# così il deploy funziona chiamando l'API Hostinger con questo file come contenuto letterale,
+# senza bisogno di caricare i sorgenti sulla VPS.
+#
+# Var d'ambiente attese (iniettate come "environment" del progetto Hostinger, non da un file .env
+# caricato — stesso meccanismo usato da n8n-rito per ${TZ}):
+#   POSTGRES_PASSWORD, GOOGLE_MAPS_API_KEY, ENCRYPTION_KEY
+
+services:
+  web:
+    build:
+      context: https://github.com/Dariodecc/lead-scraper.git
+      dockerfile: Dockerfile
+    image: leadscraper-web:latest
+    restart: unless-stopped
+    ports:
+      - "3000"
+    environment:
+      DATABASE_URL: postgresql://lead_scraper:${POSTGRES_PASSWORD}@postgres:5432/lead_scraper?schema=public
+      REDIS_URL: redis://redis:6379
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    depends_on:
+      - postgres
+      - redis
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.leadscraper.rule=Host(`leadscraper.growbe.cloud`)
+      - traefik.http.routers.leadscraper.entrypoints=websecure
+      - traefik.http.routers.leadscraper.tls.certresolver=letsencrypt
+      - traefik.http.services.leadscraper.loadbalancer.server.port=3000
+
+  # Esegue lo schema Postgres una tantum ad ogni deploy (prisma db push — niente cronologia
+  # migrazioni ancora, verrà introdotta quando lo schema si stabilizza). Si ferma da solo (exit 0).
+  migrate:
+    image: leadscraper-web:latest
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://lead_scraper:${POSTGRES_PASSWORD}@postgres:5432/lead_scraper?schema=public
+    entrypoint: ["npx", "prisma", "db", "push", "--skip-generate", "--accept-data-loss"]
+    depends_on:
+      - postgres
+
+  worker:
+    build:
+      context: https://github.com/Dariodecc/lead-scraper.git
+      dockerfile: worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://lead_scraper:${POSTGRES_PASSWORD}@postgres:5432/lead_scraper?schema=public
+      REDIS_URL: redis://redis:6379
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lead_scraper
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: lead_scraper
+    volumes:
+      - lead_scraper_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - lead_scraper_redis_data:/data
+
+  # Dump giornaliero Postgres (§10) — semplice cron in un container leggero.
+  postgres-backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    entrypoint: >
+      sh -c "while true; do
+        PGPASSWORD=$$POSTGRES_PASSWORD pg_dump -h postgres -U lead_scraper -d lead_scraper
+          > /backups/lead_scraper_$$(date +%Y%m%d_%H%M%S).sql;
+        find /backups -name '*.sql' -mtime +14 -delete;
+        sleep 86400;
+      done"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - lead_scraper_postgres_backups:/backups
+    depends_on:
+      - postgres
+
+volumes:
+  lead_scraper_postgres_data:
+  lead_scraper_redis_data:
+  lead_scraper_postgres_backups:

@@ -1,0 +1,28 @@
+# Sviluppo locale — solo le dipendenze stateful (Postgres + Redis).
+# `next dev` e il worker girano nativamente sull'host, non in container, per hot-reload veloce.
+# Per la produzione sul VPS vedi docker-compose.prod.yml (§10 della spec).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lead_scraper
+      POSTGRES_PASSWORD: lead_scraper
+      POSTGRES_DB: lead_scraper
+    ports:
+      - "5432:5432"
+    volumes:
+      - lead_scraper_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - lead_scraper_redis_data:/data
+
+volumes:
+  lead_scraper_postgres_data:
+  lead_scraper_redis_data:
