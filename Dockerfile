@@ -1,9 +1,12 @@
 # Lead Scraper — web (Next.js), build multi-stage con output "standalone".
 FROM node:22-alpine AS base
+# Prisma (query engine) richiede openssl a runtime su Alpine/musl.
+RUN apk add --no-cache openssl
 
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY worker/package.json ./worker/package.json
 RUN npm ci
 
 FROM base AS builder
