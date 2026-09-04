@@ -8,6 +8,7 @@ const KEYS = {
   defaultWebhookUrl: "default_webhook_url",
   defaultWebhookSecret: "default_webhook_secret",
   bucketThresholds: "bucket_thresholds",
+  openAiApiKey: "openai_api_key",
 } as const;
 
 async function getSetting(key: string) {
@@ -16,12 +17,13 @@ async function getSetting(key: string) {
 }
 
 export async function GET() {
-  const [apiKey, quotaCap, webhookUrl, webhookSecret, thresholds] = await Promise.all([
+  const [apiKey, quotaCap, webhookUrl, webhookSecret, thresholds, openAiKey] = await Promise.all([
     getSetting(KEYS.googleApiKey),
     getSetting(KEYS.quotaCap),
     getSetting(KEYS.defaultWebhookUrl),
     getSetting(KEYS.defaultWebhookSecret),
     getSetting(KEYS.bucketThresholds),
+    getSetting(KEYS.openAiApiKey),
   ]);
 
   return NextResponse.json({
@@ -32,6 +34,7 @@ export async function GET() {
     bucketThresholds: thresholds
       ? JSON.parse(decryptSecret(thresholds))
       : { b1: 4, b2: 8, b3: 12 },
+    hasOpenAiApiKey: isSecretSet(openAiKey),
   });
 }
 
@@ -60,6 +63,9 @@ export async function PATCH(req: Request) {
   }
   if (body.bucketThresholds) {
     writes.push(upsert(KEYS.bucketThresholds, JSON.stringify(body.bucketThresholds)));
+  }
+  if (typeof body.openAiApiKey === "string" && body.openAiApiKey.length > 0) {
+    writes.push(upsert(KEYS.openAiApiKey, body.openAiApiKey));
   }
 
   await Promise.all(writes);

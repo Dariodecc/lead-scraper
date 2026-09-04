@@ -53,7 +53,14 @@ export default function ImpostazioniPage() {
   const [hasDefaultWebhookSecret, setHasDefaultWebhookSecret] = useState(false);
   const [defaultWebhookSecret, setDefaultWebhookSecret] = useState("");
   const [bucketThresholds, setBucketThresholds] = useState({ b1: 4, b2: 8, b3: 12 });
-  const [savedFlags, setSavedFlags] = useState({ api: false, webhook: false, estimation: false });
+  const [hasOpenAiApiKey, setHasOpenAiApiKey] = useState(false);
+  const [openAiApiKey, setOpenAiApiKey] = useState("");
+  const [savedFlags, setSavedFlags] = useState({
+    api: false,
+    webhook: false,
+    estimation: false,
+    openai: false,
+  });
 
   useEffect(() => {
     fetch("/api/settings")
@@ -64,6 +71,7 @@ export default function ImpostazioniPage() {
         setDefaultWebhookUrl(data.defaultWebhookUrl ?? "");
         setHasDefaultWebhookSecret(data.hasDefaultWebhookSecret);
         setBucketThresholds(data.bucketThresholds);
+        setHasOpenAiApiKey(data.hasOpenAiApiKey);
       });
   }, []);
 
@@ -108,6 +116,19 @@ export default function ImpostazioniPage() {
       body: JSON.stringify({ bucketThresholds }),
     });
     flash("estimation");
+  }
+
+  async function saveOpenAi() {
+    await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ openAiApiKey: openAiApiKey || undefined }),
+    });
+    if (openAiApiKey) {
+      setHasOpenAiApiKey(true);
+      setOpenAiApiKey("");
+    }
+    flash("openai");
   }
 
   return (
@@ -196,6 +217,24 @@ export default function ImpostazioniPage() {
           </Field>
         </div>
         <SaveButton saved={savedFlags.estimation} onClick={saveEstimation} />
+      </SettingsCard>
+
+      <SettingsCard
+        title="OpenAI (analisi AI del sito)"
+        description="Serve solo se attivi 'Analisi AI' su una Lista (§ Attributi) — genera una breve valutazione e uno scoring di contattabilità per ogni nuovo risultato"
+      >
+        <Field
+          label={hasOpenAiApiKey ? "Chiave API (impostata — inserisci per sostituirla)" : "Chiave API"}
+        >
+          <input
+            type="password"
+            placeholder="sk-..."
+            className={inputClass}
+            value={openAiApiKey}
+            onChange={(e) => setOpenAiApiKey(e.target.value)}
+          />
+        </Field>
+        <SaveButton saved={savedFlags.openai} onClick={saveOpenAi} />
       </SettingsCard>
 
       <SettingsCard title="Documentazione API" description="Sola consultazione">

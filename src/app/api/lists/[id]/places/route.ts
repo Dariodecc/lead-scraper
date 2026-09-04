@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { resolveFixedFieldDisplay, FIXED_PLACE_FIELDS } from "@/lib/placeFields";
+import type { Prisma } from "@prisma/client";
 
 const FIXED_LABEL = new Map(FIXED_PLACE_FIELDS.map((f) => [f.key as string, f.label]));
+const DEFAULT_PAGE_SIZE = 25;
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const list = await db.list.findUnique({
     where: { id },
@@ -12,11 +14,26 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   });
   if (!list) return NextResponse.json({ error: "Lista non trovata" }, { status: 404 });
 
-  const places = await db.place.findMany({
-    where: { listId: id },
-    include: { customValues: true },
-    orderBy: { createdAt: "desc" },
-  });
+  const url = new URL(req.url);
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? "1"));
+  const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get("pageSize") ?? DEFAULT_PAGE_SIZE)));
+  const deliveryStatus = url.searchParams.get("deliveryStatus");
+
+  const where: Prisma.PlaceWhereInput = { listId: id };
+  if (deliveryStatus && deliveryStatus !== "all") {
+    where.deliveryStatus = deliveryStatus as Prisma.PlaceWhereInput["deliveryStatus"];
+  }
+
+  const [places, total] = await Promise.all([
+    db.place.findMany({
+      where,
+      include: { customValues: true },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    db.place.count({ where }),
+  ]);
 
   const visibleFields = (list.visibleFields as string[]) ?? [];
   const attrByKey = new Map(list.attributes.map((a) => [a.key, a]));
@@ -45,5 +62,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       label: attrByKey.get(key)?.name ?? FIXED_LABEL.get(key) ?? key,
     })),
     places: rows,
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
   });
 }

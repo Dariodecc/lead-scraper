@@ -27,3 +27,13 @@ export async function GET(req: Request) {
   const places = await db.place.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 });
   return NextResponse.json({ places });
 }
+
+/** Eliminazione bulk: DELETE con body { ids: string[] } (§ gestione liste/risultati). */
+export async function DELETE(req: Request) {
+  const body = await req.json().catch(() => ({}));
+  const ids = Array.isArray(body.ids) ? (body.ids as string[]) : [];
+  if (ids.length === 0) return NextResponse.json({ error: "ids richiesto" }, { status: 400 });
+
+  const result = await db.place.deleteMany({ where: { id: { in: ids } } });
+  return NextResponse.json({ deleted: result.count });
+}

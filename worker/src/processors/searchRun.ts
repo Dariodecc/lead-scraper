@@ -7,6 +7,8 @@ import { getBucketThresholds, getQuotaCap } from "../settings";
 import { enqueueWebhookDelivery } from "../queue";
 import { makeLogger } from "../log";
 import { generateGrid } from "../grid";
+import { evaluateDeliveryRules, type DeliveryRules } from "../deliveryRules";
+import { analyzeWebsite, AI_ANALYSIS_ATTR_KEY, AI_SCORE_ATTR_KEY } from "../aiAnalysis";
 
 const db = new PrismaClient();
 const log = makeLogger(db);
@@ -80,6 +82,29 @@ async function collectCellPlaceIds(params: {
   }
 }
 
+/** Crea (se assenti) i due campi custom ben noti per l'analisi AI e ritorna i loro id. */
+async function ensureAiAttributes(listId: string): Promise<{ analysisAttrId: string; scoreAttrId: string }> {
+  const [analysisAttr, scoreAttr] = await Promise.all([
+    db.listAttribute.upsert({
+      where: { listId_key: { listId, key: AI_ANALYSIS_ATTR_KEY } },
+      create: { listId, key: AI_ANALYSIS_ATTR_KEY, name: "Analisi", type: "text", position: 100 },
+      update: {},
+    }),
+    db.listAttribute.upsert({
+      where: { listId_key: { listId, key: AI_SCORE_ATTR_KEY } },
+      create: {
+        listId,
+        key: AI_SCORE_ATTR_KEY,
+        name: "Punteggio contattabilità",
+        type: "number",
+        position: 101,
+      },
+      update: {},
+    }),
+  ]);
+  return { analysisAttrId: analysisAttr.id, scoreAttrId: scoreAttr.id };
+}
+
 export async function processSearchRun(job: Job<SearchRunJobData>) {
   const run = await db.searchRun.findUnique({
     where: { id: job.data.searchRunId },
@@ -101,6 +126,17 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
     });
     return;
   }
+
+  const list = await db.list.findUnique({ where: { id: search.listId } });
+  if (!list) {
+    await db.searchRun.update({
+      where: { id: run.id },
+      data: { status: "failed", error: "Lista di destinazione non trovata", finishedAt: new Date() },
+    });
+    return;
+  }
+  const deliveryRules = list.deliveryRules as DeliveryRules | null;
+  const aiAttrs = list.aiAnalysisEnabled ? await ensureAiAttributes(list.id) : null;
 
   const quotaCap = await getQuotaCap();
   const usedToday = await googleApiCallsUsedToday();
@@ -180,12 +216,9 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
     }
 
     const placeIds = [...placeIdSet];
-    await log(
-      "info",
-      "google_api",
-      `Nearby Search: ${placeIds.length} risultati unici`,
-      { searchId: search.id },
-    );
+    await log("info", "google_api", `Nearby Search: ${placeIds.length} risultati unici`, {
+      searchId: search.id,
+    });
 
     const thresholds = await getBucketThresholds();
     let newCount = 0;
@@ -201,7 +234,10 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
       const details = await getPlaceDetails(placeId);
       await log("info", "google_api", `Place Details: ${details.businessName}`, { searchId: search.id });
 
-      const websiteStatus = details.websiteUrl ? await checkWebsiteStatus(details.websiteUrl) : "none";
+      const websiteCheck = details.websiteUrl
+        ? await checkWebsiteStatus(details.websiteUrl)
+        : { status: "outdated" as const, pageText: null };
+      const websiteStatus = details.websiteUrl ? websiteCheck.status : "none";
       const firstSeenAt = new Date();
       const { bucket, confidence } = estimateOpening({
         firstSeenAt,
@@ -209,6 +245,17 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
         earliestReviewDate: details.earliestReviewDate,
         thresholds,
       });
+
+      // Rilevazione catene: se lo stesso nome è già presente in questa lista almeno
+      // `excludeChainsThreshold` volte, questo risultato (l'ennesima ripetizione) viene escluso
+      // dall'invio — nessuna lista di brand da mantenere, si basa su ciò che si osserva.
+      let isChain = false;
+      if (list.excludeChainsThreshold != null) {
+        const sameNameCount = await db.place.count({
+          where: { listId: list.id, businessName: { equals: details.businessName, mode: "insensitive" } },
+        });
+        isChain = sameNameCount + 1 >= list.excludeChainsThreshold;
+      }
 
       const place = await db.place.create({
         data: {
@@ -235,7 +282,50 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
         },
       });
       newCount++;
-      await enqueueWebhookDelivery(place.id);
+
+      if (aiAttrs) {
+        const result = await analyzeWebsite({
+          businessName: place.businessName,
+          category: place.category,
+          websiteUrl: place.websiteUrl,
+          websiteStatus,
+          rating: details.rating,
+          reviewCount: details.reviewCount,
+          pageText: websiteCheck.pageText,
+        });
+        if (result) {
+          await db.$transaction([
+            db.placeCustomValue.upsert({
+              where: {
+                listAttributeId_placeId: { listAttributeId: aiAttrs.analysisAttrId, placeId: place.id },
+              },
+              create: { listAttributeId: aiAttrs.analysisAttrId, placeId: place.id, value: result.analysis },
+              update: { value: result.analysis },
+            }),
+            db.placeCustomValue.upsert({
+              where: {
+                listAttributeId_placeId: { listAttributeId: aiAttrs.scoreAttrId, placeId: place.id },
+              },
+              create: { listAttributeId: aiAttrs.scoreAttrId, placeId: place.id, value: result.score },
+              update: { value: result.score },
+            }),
+          ]);
+        }
+      }
+
+      const rulesCheck = evaluateDeliveryRules(place, deliveryRules);
+      if (isChain || !rulesCheck.allowed) {
+        const reason = isChain
+          ? `probabile catena (nome ripetuto ${list.excludeChainsThreshold}+ volte nella lista)`
+          : `regola di invio: ${rulesCheck.reason}`;
+        await db.place.update({ where: { id: place.id }, data: { deliveryStatus: "excluded" } });
+        await log("info", "webhook_delivery", `Escluso dall'invio (${reason})`, {
+          searchId: search.id,
+          placeId: place.id,
+        });
+      } else {
+        await enqueueWebhookDelivery(place.id);
+      }
 
       if (isTest && newCount >= 1) break; // un solo esempio nuovo basta per mappare i campi
     }

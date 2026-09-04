@@ -45,6 +45,7 @@ export const DELIVERY_STATUS_LABEL: Record<string, string> = {
   pending: "Nuovo",
   delivered: "Consegnato",
   failed: "Fallito",
+  excluded: "Escluso",
 };
 
 interface PlaceLike {

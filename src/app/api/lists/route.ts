@@ -12,10 +12,11 @@ export async function GET() {
 
   const withCounts = await Promise.all(
     lists.map(async (l) => {
-      const [newCount, deliveredCount, failedCount] = await Promise.all([
+      const [newCount, deliveredCount, failedCount, excludedCount] = await Promise.all([
         db.place.count({ where: { listId: l.id, deliveryStatus: "pending" } }),
         db.place.count({ where: { listId: l.id, deliveryStatus: "delivered" } }),
         db.place.count({ where: { listId: l.id, deliveryStatus: "failed" } }),
+        db.place.count({ where: { listId: l.id, deliveryStatus: "excluded" } }),
       ]);
       return {
         id: l.id,
@@ -25,6 +26,7 @@ export async function GET() {
         newCount,
         deliveredCount,
         failedCount,
+        excludedCount,
         createdAt: l.createdAt,
       };
     }),

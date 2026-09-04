@@ -41,6 +41,7 @@ enum DeliveryStatus {
   pending
   delivered
   failed
+  excluded // scartato dal filtro di invio della Lista, mai accodato al webhook (§ filtro liste)
 }
 
 enum ListAttributeType {
@@ -92,6 +93,19 @@ model List {
   visibleFields Json  @default("[]") @map("visible_fields")
   // Dati mostrati sulla card nella vista d'insieme — §7.2
   cardFields    Json  @default("[]") @map("card_fields")
+
+  // Filtro di invio al webhook — a livello di Lista (non Impostazioni, non per-ricerca): un
+  // risultato che non passa resta salvato (dedup, visibilità) ma con delivery_status=excluded,
+  // mai accodato alla consegna. { conditions: [{field, operator, value}, ...] }, tutte in AND.
+  deliveryRules Json? @map("delivery_rules")
+  // Se un business_name compare già >= a questa soglia volte in questa lista, i successivi
+  // vengono considerati catene ed esclusi automaticamente — nessuna lista di nomi da mantenere.
+  excludeChainsThreshold Int? @map("exclude_chains_threshold")
+
+  // Analisi AI del sito (OpenAI) per ogni nuovo risultato — quando attiva, crea/aggiorna i due
+  // campi custom ben noti "Analisi" (analisi_ai) e "Punteggio contattabilità" (punteggio_ai).
+  aiAnalysisEnabled Boolean @default(false) @map("ai_analysis_enabled")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -144,7 +158,8 @@ model Place {
   phone        String?
 
   listId String @map("list_id") @db.Uuid
-  list   List   @relation(fields: [listId], references: [id], onDelete: Restrict)
+  // Cascade: eliminare una Lista elimina anche i suoi risultati (l'utente viene avvisato in UI).
+  list   List   @relation(fields: [listId], references: [id], onDelete: Cascade)
 
   category String?
 

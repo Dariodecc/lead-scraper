@@ -25,7 +25,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (typeof body.name === "string") data.name = body.name;
   if (Array.isArray(body.visibleFields)) data.visibleFields = body.visibleFields;
   if (Array.isArray(body.cardFields)) data.cardFields = body.cardFields;
+  // Filtro di invio — a livello di Lista (non Impostazioni, non per-ricerca).
+  if (body.deliveryRules !== undefined) data.deliveryRules = body.deliveryRules;
+  if (body.excludeChainsThreshold !== undefined) {
+    data.excludeChainsThreshold = body.excludeChainsThreshold === null ? null : Number(body.excludeChainsThreshold);
+  }
+  if (typeof body.aiAnalysisEnabled === "boolean") data.aiAnalysisEnabled = body.aiAnalysisEnabled;
 
   const list = await db.list.update({ where: { id }, data });
   return NextResponse.json({ list });
+}
+
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  // Cascade nello schema: elimina anche tutti i risultati di questa lista (l'utente viene
+  // avvisato in UI prima di confermare).
+  await db.list.delete({ where: { id } });
+  return NextResponse.json({ ok: true });
 }

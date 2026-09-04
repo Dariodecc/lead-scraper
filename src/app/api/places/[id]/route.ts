@@ -16,3 +16,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   return NextResponse.json({ place: { ...place, customAttributes } });
 }
+
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  await db.place.delete({ where: { id } });
+  return NextResponse.json({ ok: true });
+}

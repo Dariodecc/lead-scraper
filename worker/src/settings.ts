@@ -10,6 +10,7 @@ const KEYS = {
   defaultWebhookUrl: "default_webhook_url",
   defaultWebhookSecret: "default_webhook_secret",
   bucketThresholds: "bucket_thresholds",
+  openAiApiKey: "openai_api_key",
 } as const;
 
 async function read(key: string): Promise<string | null> {
@@ -37,4 +38,11 @@ export async function getDefaultWebhook(): Promise<{ url: string | null; secret:
 export async function getBucketThresholds(): Promise<{ b1: number; b2: number; b3: number }> {
   const v = await read(KEYS.bucketThresholds);
   return v ? JSON.parse(v) : { b1: 4, b2: 8, b3: 12 };
+}
+
+export async function getOpenAiApiKey(): Promise<string> {
+  const fromDb = await read(KEYS.openAiApiKey);
+  if (fromDb) return fromDb;
+  if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
+  throw new Error("OpenAI API key non configurata — impostala in Impostazioni");
 }
