@@ -6,6 +6,7 @@ import { estimateOpening } from "../lib/openingEstimate";
 import { getBucketThresholds, getQuotaCap } from "../settings";
 import { enqueueWebhookDelivery } from "../queue";
 import { makeLogger } from "../log";
+import { generateGrid } from "../grid";
 
 const db = new PrismaClient();
 const log = makeLogger(db);
@@ -13,6 +14,12 @@ const log = makeLogger(db);
 interface SearchRunJobData {
   searchRunId: string;
 }
+
+// Nearby Search (New) tronca a 20 risultati per chiamata, senza paginazione (limite reale
+// dell'API, non un nostro difetto — vedi grid.ts). Sotto questa soglia una singola chiamata
+// basta; sopra, si copre l'area con una griglia di celle da CELL_RADIUS_M.
+const CELL_RADIUS_M = 3000;
+const MAX_GRID_CELLS = 30;
 
 async function googleApiCallsUsedToday(): Promise<number> {
   const startOfDay = new Date();
@@ -61,13 +68,53 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
   }
 
   try {
-    const placeIds = await nearbySearchPlaceIds({
-      lat: Number(search.areaLat),
-      lng: Number(search.areaLng),
-      radiusM: search.areaRadiusM,
-      includedType: search.categoryPlaceType,
-    });
-    await log("info", "google_api", `Nearby Search: ${placeIds.length} risultati`, { searchId: search.id });
+    const centerLat = Number(search.areaLat);
+    const centerLng = Number(search.areaLng);
+    const { cells, truncated } = generateGrid(
+      centerLat,
+      centerLng,
+      search.areaRadiusM,
+      CELL_RADIUS_M,
+      MAX_GRID_CELLS,
+    );
+
+    if (cells.length > 1) {
+      await log(
+        "info",
+        "google_api",
+        `Copertura a griglia: ${cells.length} zone da ${CELL_RADIUS_M / 1000}km da scansionare` +
+          (truncated ? ` (area troppo ampia, coperto solo il centro entro ${MAX_GRID_CELLS} celle)` : ""),
+        { searchId: search.id },
+      );
+    }
+
+    const placeIdSet = new Set<string>();
+    for (const cell of cells) {
+      const usedNow = await googleApiCallsUsedToday();
+      if (usedNow >= quotaCap) {
+        await log(
+          "warning",
+          "google_api",
+          "Quota giornaliera raggiunta a metà run — copertura griglia interrotta",
+          { searchId: search.id },
+        );
+        break;
+      }
+      const ids = await nearbySearchPlaceIds({
+        lat: cell.lat,
+        lng: cell.lng,
+        radiusM: cells.length > 1 ? CELL_RADIUS_M : search.areaRadiusM,
+        includedType: search.categoryPlaceType,
+      });
+      ids.forEach((id) => placeIdSet.add(id));
+    }
+    const placeIds = [...placeIdSet];
+    await log(
+      "info",
+      "google_api",
+      `Nearby Search: ${placeIds.length} risultati unici` + (cells.length > 1 ? ` su ${cells.length} zone` : ""),
+      { searchId: search.id },
+    );
 
     const thresholds = await getBucketThresholds();
     let newCount = 0;

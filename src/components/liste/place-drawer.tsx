@@ -7,6 +7,7 @@ import {
   BUCKET_LABEL,
   CONFIDENCE_LABEL,
   DELIVERY_STATUS_LABEL,
+  BUSINESS_STATUS_LABEL,
 } from "@/lib/placeFields";
 
 interface PlaceDetail {
@@ -20,8 +21,10 @@ interface PlaceDetail {
   rating: number | null;
   reviewCount: number | null;
   priceLevel: number | null;
+  businessStatus: string | null;
   estimatedOpeningWindow: string;
   estimationConfidence: string;
+  confirmedOpeningDate: string | null;
   deliveryStatus: string;
   customAttributes: Record<string, unknown>;
 }
@@ -68,7 +71,25 @@ export function PlaceDrawer({ placeId, onClose }: { placeId: string | null; onCl
           <div className="flex flex-col gap-3.5">
             <Row label="Telefono" value={<span className="font-mono">{place.phone ?? "—"}</span>} />
             <Row
-              label="Sito web"
+              label="URL sito"
+              value={
+                place.websiteUrl ? (
+                  <a
+                    href={place.websiteUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="max-w-[220px] truncate underline"
+                    title={place.websiteUrl}
+                  >
+                    {place.websiteUrl}
+                  </a>
+                ) : (
+                  "—"
+                )
+              }
+            />
+            <Row
+              label="Stato sito"
               value={
                 <span className="rounded-full bg-muted px-3 py-0.5 text-xs font-medium">
                   {WEBSITE_STATUS_LABEL[place.websiteStatus] ?? place.websiteStatus}
@@ -84,6 +105,18 @@ export function PlaceDrawer({ placeId, onClose }: { placeId: string | null; onCl
               value={place.priceLevel ? PRICE_LABEL[place.priceLevel] : "Non disponibile"}
             />
             <Row
+              label="Stato attività"
+              value={
+                place.businessStatus ? (
+                  <span className="rounded-full bg-muted px-3 py-0.5 text-xs font-medium">
+                    {BUSINESS_STATUS_LABEL[place.businessStatus] ?? place.businessStatus}
+                  </span>
+                ) : (
+                  "—"
+                )
+              }
+            />
+            <Row
               label="Apertura stimata"
               value={
                 <span className="rounded-full bg-muted px-3 py-0.5 text-xs font-semibold">
@@ -92,6 +125,12 @@ export function PlaceDrawer({ placeId, onClose }: { placeId: string | null; onCl
               }
             />
             <Row label="Confidenza stima" value={CONFIDENCE_LABEL[place.estimationConfidence]} />
+            {place.confirmedOpeningDate && (
+              <Row
+                label="Data apertura confermata"
+                value={new Date(place.confirmedOpeningDate).toLocaleDateString("it-IT")}
+              />
+            )}
             {Object.entries(place.customAttributes).map(([key, value]) => (
               <Row key={key} label={key} value={String(value)} />
             ))}

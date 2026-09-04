@@ -222,7 +222,7 @@ export function SearchDrawer({
         <AreaAutocomplete value={draft.area} onChange={(area) => setDraft((d) => ({ ...d, area }))} />
       </Field>
 
-      <Field label="Raggio di ricerca (km)">
+      <Field label="Raggio di copertura (km)">
         <input
           type="number"
           min={1}
@@ -231,6 +231,10 @@ export function SearchDrawer({
           value={draft.radiusKm}
           onChange={(e) => setDraft((d) => ({ ...d, radiusKm: Number(e.target.value) }))}
         />
+        <div className="mt-1.5 text-xs text-muted-soft">
+          Oltre i 3km viene coperto con più chiamate a Google Places (limite dell&apos;API: max
+          20 risultati a chiamata) — raggi ampi consumano più quota giornaliera.
+        </div>
       </Field>
 
       <Field label="Categoria commerciale (Place Type)">

@@ -138,4 +138,9 @@
   html {
     @apply font-sans;
   }
+  /* Tailwind v4 azzera il cursore pointer di default sui bottoni — lo ripristiniamo
+     globalmente invece di aggiungerlo manualmente ad ogni className. */
+  button:not(:disabled) {
+    cursor: pointer;
+  }
 }
