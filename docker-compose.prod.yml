@@ -38,7 +38,7 @@ services:
   # Esegue lo schema Postgres una tantum ad ogni deploy (prisma db push — niente cronologia
   # migrazioni ancora, verrà introdotta quando lo schema si stabilizza). Si ferma da solo (exit 0).
   migrate:
-    image: ghcr.io/dariodecc/lead-scraper-web:latest
+    image: ghcr.io/dariodecc/lead-scraper-migrate:latest
     restart: "no"
     environment:
       DATABASE_URL: postgresql://lead_scraper:${POSTGRES_PASSWORD}@postgres:5432/lead_scraper?schema=public
