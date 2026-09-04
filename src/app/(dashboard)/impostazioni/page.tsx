@@ -1,3 +1,7 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
 function SettingsCard({
   title,
   description,
@@ -19,43 +23,122 @@ function SettingsCard({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-4">
-      <label className="mb-1.5 block text-[13px] font-medium text-foreground/80">
-        {label}
-      </label>
+      <label className="mb-1.5 block text-[13px] font-medium text-foreground/80">{label}</label>
       {children}
     </div>
   );
 }
 
-const inputClass =
-  "h-10 w-full rounded-md border border-border bg-background px-3.5 text-sm";
+const inputClass = "h-10 w-full rounded-md border border-border bg-background px-3.5 text-sm";
+
+function SaveButton({ saved, onClick }: { saved: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-10 rounded-md px-4.5 text-sm font-semibold ${
+        saved ? "cursor-default bg-success/10 text-success" : "bg-primary text-primary-foreground"
+      }`}
+    >
+      {saved ? "Salvato ✓" : "Salva"}
+    </button>
+  );
+}
 
 export default function ImpostazioniPage() {
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [quotaCap, setQuotaCap] = useState(500);
+  const [defaultWebhookUrl, setDefaultWebhookUrl] = useState("");
+  const [hasDefaultWebhookSecret, setHasDefaultWebhookSecret] = useState(false);
+  const [defaultWebhookSecret, setDefaultWebhookSecret] = useState("");
+  const [bucketThresholds, setBucketThresholds] = useState({ b1: 4, b2: 8, b3: 12 });
+  const [savedFlags, setSavedFlags] = useState({ api: false, webhook: false, estimation: false });
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        setHasApiKey(data.hasApiKey);
+        setQuotaCap(data.quotaCap);
+        setDefaultWebhookUrl(data.defaultWebhookUrl ?? "");
+        setHasDefaultWebhookSecret(data.hasDefaultWebhookSecret);
+        setBucketThresholds(data.bucketThresholds);
+      });
+  }, []);
+
+  function flash(key: keyof typeof savedFlags) {
+    setSavedFlags((f) => ({ ...f, [key]: true }));
+    setTimeout(() => setSavedFlags((f) => ({ ...f, [key]: false })), 1800);
+  }
+
+  async function saveApi() {
+    await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: apiKey || undefined, quotaCap }),
+    });
+    if (apiKey) {
+      setHasApiKey(true);
+      setApiKey("");
+    }
+    flash("api");
+  }
+
+  async function saveWebhook() {
+    await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        defaultWebhookUrl,
+        defaultWebhookSecret: defaultWebhookSecret || undefined,
+      }),
+    });
+    if (defaultWebhookSecret) {
+      setHasDefaultWebhookSecret(true);
+      setDefaultWebhookSecret("");
+    }
+    flash("webhook");
+  }
+
+  async function saveEstimation() {
+    await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bucketThresholds }),
+    });
+    flash("estimation");
+  }
+
   return (
     <div className="max-w-[640px] px-12 pb-12 pt-10">
       <div className="mb-6">
-        <h1 className="mb-1.5 text-[28px] font-semibold tracking-tight">
-          Impostazioni
-        </h1>
+        <h1 className="mb-1.5 text-[28px] font-semibold tracking-tight">Impostazioni</h1>
         <p className="text-sm text-muted-foreground">
-          Chiavi API, webhook di default, stima apertura e documentazione —
-          gli Attributi si configurano per singola lista
+          Chiavi API, webhook di default, stima apertura e documentazione — gli Attributi si
+          configurano per singola lista
         </p>
       </div>
 
-      <SettingsCard
-        title="Google Places API"
-        description="Chiave API e cap di quota giornaliera"
-      >
-        <Field label="Chiave API">
-          <input type="password" placeholder="AIza..." className={inputClass} />
+      <SettingsCard title="Google Places API" description="Chiave API e cap di quota giornaliera">
+        <Field label={hasApiKey ? "Chiave API (impostata — inserisci per sostituirla)" : "Chiave API"}>
+          <input
+            type="password"
+            placeholder="AIza..."
+            className={inputClass}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+          />
         </Field>
         <Field label="Cap giornaliero richieste">
-          <input type="number" defaultValue={500} className={inputClass} />
+          <input
+            type="number"
+            className={inputClass}
+            value={quotaCap}
+            onChange={(e) => setQuotaCap(Number(e.target.value))}
+          />
         </Field>
-        <button className="h-10 rounded-md bg-primary px-4.5 text-sm font-semibold text-primary-foreground">
-          Salva
-        </button>
+        <SaveButton saved={savedFlags.api} onClick={saveApi} />
       </SettingsCard>
 
       <SettingsCard
@@ -67,14 +150,19 @@ export default function ImpostazioniPage() {
             type="text"
             placeholder="https://crm.tuodominio.com/api/webhooks/lead-scraper"
             className={`${inputClass} font-mono`}
+            value={defaultWebhookUrl}
+            onChange={(e) => setDefaultWebhookUrl(e.target.value)}
           />
         </Field>
-        <Field label="Shared secret">
-          <input type="password" className={inputClass} />
+        <Field label={hasDefaultWebhookSecret ? "Shared secret (impostato — inserisci per sostituirlo)" : "Shared secret"}>
+          <input
+            type="password"
+            className={inputClass}
+            value={defaultWebhookSecret}
+            onChange={(e) => setDefaultWebhookSecret(e.target.value)}
+          />
         </Field>
-        <button className="h-10 rounded-md bg-primary px-4.5 text-sm font-semibold text-primary-foreground">
-          Salva
-        </button>
+        <SaveButton saved={savedFlags.webhook} onClick={saveWebhook} />
       </SettingsCard>
 
       <SettingsCard
@@ -83,18 +171,31 @@ export default function ImpostazioniPage() {
       >
         <div className="mb-5 grid grid-cols-3 gap-4">
           <Field label="0-4m fino a">
-            <input type="number" defaultValue={4} className={inputClass} />
+            <input
+              type="number"
+              className={inputClass}
+              value={bucketThresholds.b1}
+              onChange={(e) => setBucketThresholds((t) => ({ ...t, b1: Number(e.target.value) }))}
+            />
           </Field>
           <Field label="4-8m fino a">
-            <input type="number" defaultValue={8} className={inputClass} />
+            <input
+              type="number"
+              className={inputClass}
+              value={bucketThresholds.b2}
+              onChange={(e) => setBucketThresholds((t) => ({ ...t, b2: Number(e.target.value) }))}
+            />
           </Field>
           <Field label="8-12m fino a">
-            <input type="number" defaultValue={12} className={inputClass} />
+            <input
+              type="number"
+              className={inputClass}
+              value={bucketThresholds.b3}
+              onChange={(e) => setBucketThresholds((t) => ({ ...t, b3: Number(e.target.value) }))}
+            />
           </Field>
         </div>
-        <button className="h-10 rounded-md bg-primary px-4.5 text-sm font-semibold text-primary-foreground">
-          Salva
-        </button>
+        <SaveButton saved={savedFlags.estimation} onClick={saveEstimation} />
       </SettingsCard>
 
       <SettingsCard title="Documentazione API" description="Sola consultazione">
@@ -114,15 +215,12 @@ export default function ImpostazioniPage() {
           GET /api/lists/:id/attributes
         </div>
         <div className="mb-2 text-xs text-muted-soft">
-          Header di autenticazione richiesto sulle chiamate in ingresso al
-          webhook
+          Header di autenticazione richiesto sulle chiamate in ingresso al webhook
         </div>
         <div className="mb-3.5 rounded-md border border-border bg-background p-3.5 font-mono text-[13px]">
           X-Webhook-Secret: ••••••••
         </div>
-        <div className="mb-2 text-xs text-muted-soft">
-          Esempio payload in uscita
-        </div>
+        <div className="mb-2 text-xs text-muted-soft">Esempio payload in uscita</div>
         <div className="whitespace-pre rounded-md border border-border bg-background p-3.5 font-mono text-xs leading-6">
           {`{ "event": "lead.discovered", "place_id": "...",
   "business_name": "...", "attributes": { ... } }`}

@@ -1,35 +1,25 @@
 import { Worker } from "bullmq";
-import IORedis from "ioredis";
-import { PrismaClient } from "@prisma/client";
+import { connection } from "./queue";
+import { processSearchRun } from "./processors/searchRun";
+import { processWebhookDelivery } from "./processors/webhookDelivery";
+import { startScheduler } from "./scheduler";
+import { closeBrowser } from "./websiteCheck";
 
-const connection = new IORedis(process.env.REDIS_URL ?? "redis://localhost:6379", {
-  maxRetriesPerRequest: null,
+const searchRunWorker = new Worker("search-run", processSearchRun, { connection, concurrency: 1 });
+const webhookDeliveryWorker = new Worker("webhook-delivery", processWebhookDelivery, {
+  connection,
+  concurrency: 5,
 });
 
-const db = new PrismaClient();
+searchRunWorker.on("ready", () => console.log("Lead Scraper worker pronto — coda 'search-run'"));
+webhookDeliveryWorker.on("ready", () => console.log("Lead Scraper worker pronto — coda 'webhook-delivery'"));
+searchRunWorker.on("failed", (job, err) => console.error(`search-run ${job?.id} fallito:`, err));
+webhookDeliveryWorker.on("failed", (job, err) => console.error(`webhook-delivery ${job?.id} fallito:`, err));
 
-// Fase 0: worker "hello world" — solo per verificare che il container si avvii, si connetta
-// a Redis/Postgres e resti in ascolto. I processor reali (esecuzione ricerca, Google Places,
-// arricchimento, consegna webhook) arrivano nelle fasi successive (§11 della spec).
-const searchRunWorker = new Worker(
-  "search-run",
-  async (job) => {
-    console.log(`[search-run] job ${job.id} ricevuto (processor non ancora implementato)`);
-  },
-  { connection },
-);
-
-searchRunWorker.on("ready", () => {
-  console.log("Lead Scraper worker pronto — in ascolto sulla coda 'search-run'");
-});
-
-searchRunWorker.on("error", (err) => {
-  console.error("Errore worker BullMQ:", err);
-});
+startScheduler();
 
 async function shutdown() {
-  await searchRunWorker.close();
-  await db.$disconnect();
+  await Promise.all([searchRunWorker.close(), webhookDeliveryWorker.close(), closeBrowser()]);
   await connection.quit();
   process.exit(0);
 }

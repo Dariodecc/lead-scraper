@@ -1,27 +1,77 @@
-const COLUMNS = [
-  "Titolo",
-  "Zona",
-  "Categoria",
-  "Frequenza",
-  "Stato",
-  "Prossima",
-  "Azioni",
-] as const;
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { SearchDrawer, type SearchRecord, type ListSummary } from "@/components/ricerche/search-drawer";
+import { placeTypeLabel } from "@/lib/placeTypes";
+
+const COLUMNS = ["Titolo", "Zona", "Categoria", "Frequenza", "Stato", "Prossima", "Azioni"] as const;
+
+const STATUS_LABEL: Record<string, string> = { draft: "Bozza", active: "Attiva", paused: "In pausa" };
+const FREQ_LABEL: Record<string, string> = { once: "Una tantum", weekly: "Settimanale", monthly: "Mensile" };
 
 export default function RicerchePage() {
+  const [searches, setSearches] = useState<SearchRecord[]>([]);
+  const [lists, setLists] = useState<ListSummary[]>([]);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editing, setEditing] = useState<SearchRecord | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    const [searchesRes, listsRes] = await Promise.all([fetch("/api/searches"), fetch("/api/lists")]);
+    const searchesData = await searchesRes.json();
+    const listsData = await listsRes.json();
+
+    setSearches(searchesData.searches ?? []);
+
+    const listsWithAttrs = await Promise.all(
+      (listsData.lists ?? []).map(async (l: { id: string }) => {
+        const res = await fetch(`/api/lists/${l.id}`);
+        const data = await res.json();
+        return { id: data.list.id, name: data.list.name, attributes: data.list.attributes };
+      }),
+    );
+    setLists(listsWithAttrs);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch dati iniziali al mount
+    load();
+  }, [load]);
+
+  async function toggleStatus(s: SearchRecord) {
+    if (s.status === "draft" && !s.listId) return;
+    const nextStatus = s.status === "active" ? "paused" : "active";
+    const res = await fetch(`/api/searches/${s.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: nextStatus }),
+    });
+    if (res.ok) load();
+  }
+
+  async function runTest(s: SearchRecord, e: React.MouseEvent) {
+    e.stopPropagation();
+    await fetch(`/api/searches/${s.id}/test`, { method: "POST" });
+    load();
+  }
+
   return (
     <div className="px-12 pb-12 pt-10">
       <div className="mb-8 flex items-start justify-between">
         <div>
-          <h1 className="mb-1.5 text-[28px] font-semibold tracking-tight">
-            Ricerche
-          </h1>
+          <h1 className="mb-1.5 text-[28px] font-semibold tracking-tight">Ricerche</h1>
           <p className="text-sm text-muted-foreground">
-            Zona e categoria da liste compatibili con Google Places, frequenza
-            e webhook per ricerca
+            Zona e categoria da liste compatibili con Google Places, frequenza e webhook per ricerca
           </p>
         </div>
-        <button className="h-10 rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground">
+        <button
+          className="h-10 rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground"
+          onClick={() => {
+            setEditing(null);
+            setDrawerOpen(true);
+          }}
+        >
           + Nuova ricerca
         </button>
       </div>
@@ -31,19 +81,77 @@ export default function RicerchePage() {
           {COLUMNS.map((col) => (
             <span
               key={col}
-              className={`text-xs font-medium uppercase tracking-wide text-muted-foreground ${
-                col === "Azioni" ? "text-right" : ""
-              }`}
+              className={`text-xs font-medium uppercase tracking-wide text-muted-foreground ${col === "Azioni" ? "text-right" : ""}`}
             >
               {col}
             </span>
           ))}
         </div>
-        <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-          Nessuna ricerca ancora — crea la prima ricerca con &ldquo;+ Nuova
-          ricerca&rdquo;.
-        </div>
+
+        {!loading && searches.length === 0 && (
+          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+            Nessuna ricerca ancora — crea la prima ricerca con &ldquo;+ Nuova ricerca&rdquo;.
+          </div>
+        )}
+
+        {searches.map((s) => (
+          <div
+            key={s.id}
+            className="grid cursor-pointer grid-cols-[1.7fr_1fr_1fr_0.85fr_0.75fr_1fr_1.6fr] items-center gap-x-3 border-b border-hairline-soft px-5 py-4"
+            onClick={() => {
+              setEditing(s);
+              setDrawerOpen(true);
+            }}
+          >
+            <span className="truncate text-sm font-medium" title={s.title}>
+              {s.title}
+            </span>
+            <span className="truncate text-[13px]">{s.areaLabel}</span>
+            <span className="truncate text-[13px]">{placeTypeLabel(s.categoryPlaceType)}</span>
+            <span className="text-[13px]">{FREQ_LABEL[s.frequency]}</span>
+            <span
+              className={`w-fit rounded-full px-3 py-0.5 text-xs font-medium ${
+                s.status === "active"
+                  ? "bg-success/10 text-success"
+                  : s.status === "paused"
+                    ? "bg-warning/10 text-warning"
+                    : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {STATUS_LABEL[s.status]}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {s.status === "active" ? "vedi dettaglio" : "—"}
+            </span>
+            <span className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+              <button
+                className="rounded-md border border-border bg-background px-2 py-1.5 text-[11.5px] font-semibold whitespace-nowrap"
+                onClick={(e) => runTest(s, e)}
+              >
+                TEST
+              </button>
+              <button
+                disabled={s.status === "draft" && !s.listId}
+                className="rounded-md border border-border bg-background px-2 py-1.5 text-[11.5px] font-semibold whitespace-nowrap disabled:opacity-40"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleStatus(s);
+                }}
+              >
+                {s.status === "active" ? "Pausa" : "Attiva"}
+              </button>
+            </span>
+          </div>
+        ))}
       </div>
+
+      <SearchDrawer
+        open={drawerOpen}
+        search={editing}
+        lists={lists}
+        onClose={() => setDrawerOpen(false)}
+        onSaved={load}
+      />
     </div>
   );
 }
