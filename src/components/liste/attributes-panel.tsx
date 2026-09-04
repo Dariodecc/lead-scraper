@@ -87,9 +87,12 @@ function DeliveryFilterSection({
           <span className="text-xs text-muted-foreground">o più volte in questa lista</span>
         </div>
         <div className="text-[11px] text-muted-soft">
-          Nessuna lista di brand da mantenere: si basa su ciò che trovi tu stesso — utile per
-          scartare catene (McDonald&apos;s, ecc.) senza doverle elencare a mano. Lascia vuoto per
-          disattivare.
+          Esempio con soglia 2: la ricerca trova un &ldquo;McDonald&apos;s&rdquo; → va bene, è il
+          primo con quel nome, resta Nuovo. Più avanti (stessa lista, anche da un&apos;altra
+          ricerca) ne trova un secondo → quello viene segnato Escluso, perché il sistema deduce
+          da solo &ldquo;stesso nome due volte = probabile catena con più sedi&rdquo;. Nessuna
+          lista di brand da scrivere a mano. Vale solo da quando attivi la soglia in poi — chi era
+          già stato trovato prima non viene ricontrollato. Lascia vuoto per disattivare.
         </div>
       </div>
 

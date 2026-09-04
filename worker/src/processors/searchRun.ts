@@ -288,12 +288,19 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
           businessName: place.businessName,
           category: place.category,
           websiteUrl: place.websiteUrl,
-          websiteStatus,
+          heuristicWebsiteStatus: websiteStatus,
           rating: details.rating,
           reviewCount: details.reviewCount,
+          priceLevel: details.priceLevel,
+          estimatedOpeningWindow: bucket,
+          estimationConfidence: confidence,
           pageText: websiteCheck.pageText,
         });
         if (result) {
+          // Il giudizio AI (basato sul testo vero della pagina) sostituisce l'euristica Playwright
+          // (solo meta viewport, soggetta a falsi positivi sui siti con protezioni anti-bot).
+          if (result.websiteStatus) place.websiteStatus = result.websiteStatus;
+
           await db.$transaction([
             db.placeCustomValue.upsert({
               where: {
@@ -309,6 +316,9 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
               create: { listAttributeId: aiAttrs.scoreAttrId, placeId: place.id, value: result.score },
               update: { value: result.score },
             }),
+            ...(result.websiteStatus
+              ? [db.place.update({ where: { id: place.id }, data: { websiteStatus: result.websiteStatus } })]
+              : []),
           ]);
         }
       }
