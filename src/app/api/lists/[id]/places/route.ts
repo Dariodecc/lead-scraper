@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { resolveFixedFieldDisplay } from "@/lib/placeFields";
+import { resolveFixedFieldDisplay, FIXED_PLACE_FIELDS } from "@/lib/placeFields";
+
+const FIXED_LABEL = new Map(FIXED_PLACE_FIELDS.map((f) => [f.key as string, f.label]));
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -40,7 +42,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   return NextResponse.json({
     visibleColumns: visibleFields.map((key) => ({
       key,
-      label: attrByKey.get(key)?.name ?? key,
+      label: attrByKey.get(key)?.name ?? FIXED_LABEL.get(key) ?? key,
     })),
     places: rows,
   });

@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // worker/ è un package npm separato (tsc, non next lint) con la sua build compilata.
+    "worker/dist/**",
   ]),
 ]);
 

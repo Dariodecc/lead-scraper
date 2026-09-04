@@ -49,12 +49,15 @@ export interface AreaDetails {
 
 /** Risolve un place_id di zona in etichetta leggibile + coordinate del centro (§4). */
 export async function resolveArea(placeId: string): Promise<AreaDetails> {
-  const res = await fetch(`${PLACES_BASE}/places/${encodeURIComponent(placeId)}`, {
-    headers: {
-      "X-Goog-Api-Key": await getGoogleApiKey(),
-      "X-Goog-FieldMask": "id,formattedAddress,location,displayName",
+  const res = await fetch(
+    `${PLACES_BASE}/places/${encodeURIComponent(placeId)}?languageCode=it`,
+    {
+      headers: {
+        "X-Goog-Api-Key": await getGoogleApiKey(),
+        "X-Goog-FieldMask": "id,formattedAddress,location,displayName",
+      },
     },
-  });
+  );
   if (!res.ok) {
     throw new Error(`Place Details fallita: ${res.status} ${await res.text()}`);
   }
