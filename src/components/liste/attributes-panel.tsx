@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { inputClass, selectClass } from "@/components/ui/field";
-import { FIXED_PLACE_FIELDS } from "@/lib/placeFields";
+import { FIXED_PLACE_FIELDS, resolveFixedFieldDisplay } from "@/lib/placeFields";
 
 const ATTR_TYPES = ["text", "number", "date", "boolean", "select"] as const;
 
@@ -17,11 +17,15 @@ export function AttributesPanel({
   listId,
   attributes,
   visibleFields,
+  samplePlace,
   onChanged,
 }: {
   listId: string;
   attributes: ListAttribute[];
   visibleFields: string[];
+  // Un risultato reale della lista (di solito l'ultimo TEST) usato per mostrare cosa c'è
+  // davvero in ogni campo, invece di far scegliere le colonne "al buio" (§7.2).
+  samplePlace: Parameters<typeof resolveFixedFieldDisplay>[0] | null;
   onChanged: () => void;
 }) {
   const [name, setName] = useState("");
@@ -61,22 +65,34 @@ export function AttributesPanel({
     onChanged();
   }
 
+  const fixedKeys = new Set(FIXED_PLACE_FIELDS.map((f) => f.key as string));
+
   return (
     <div className="mb-5 rounded-xl border border-border bg-muted p-5">
-      <div className="mb-3 text-[13px] font-semibold">Colonne mostrate in tabella</div>
+      <div className="mb-1 text-[13px] font-semibold">Colonne mostrate in tabella</div>
+      <div className="mb-3 text-xs text-muted-soft">
+        {samplePlace
+          ? "Sotto ogni campo il valore reale dell'ultimo risultato — scegli sapendo cosa è davvero popolato per questa categoria."
+          : "Esegui un TEST sulla ricerca collegata per vedere un esempio di valori qui sotto."}
+      </div>
       <div className="mb-5 flex flex-wrap gap-2">
         {allFields.map((f) => (
           <button
             key={f.key}
             type="button"
             onClick={() => toggleVisible(f.key)}
-            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+            className={`flex max-w-[160px] flex-col items-start rounded-lg border px-3 py-1.5 text-xs font-medium ${
               visibleFields.includes(f.key)
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-background text-muted-foreground"
             }`}
           >
-            {f.label}
+            <span>{f.label}</span>
+            {samplePlace && fixedKeys.has(f.key) && (
+              <span className="truncate text-[11px] font-normal opacity-80">
+                {resolveFixedFieldDisplay(samplePlace, f.key)}
+              </span>
+            )}
           </button>
         ))}
       </div>

@@ -232,8 +232,9 @@ export function SearchDrawer({
           onChange={(e) => setDraft((d) => ({ ...d, radiusKm: Number(e.target.value) }))}
         />
         <div className="mt-1.5 text-xs text-muted-soft">
-          Oltre i 3km viene coperto con più chiamate a Google Places (limite dell&apos;API: max
-          20 risultati a chiamata) — raggi ampi consumano più quota giornaliera.
+          Google restituisce al massimo 20 risultati a chiamata: l&apos;area viene coperta con più
+          chiamate (a griglia, con suddivisione automatica nelle zone dense) — raggi ampi o
+          categorie molto diffuse consumano più quota giornaliera.
         </div>
       </Field>
 

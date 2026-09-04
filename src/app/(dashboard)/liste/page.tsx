@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { NewListDrawer } from "@/components/liste/new-list-drawer";
 import { AttributesPanel, type ListAttribute } from "@/components/liste/attributes-panel";
 import { PlaceDrawer } from "@/components/liste/place-drawer";
-import { DELIVERY_STATUS_LABEL } from "@/lib/placeFields";
+import { DELIVERY_STATUS_LABEL, resolveFixedFieldDisplay } from "@/lib/placeFields";
 
 interface ListOverview {
   id: string;
@@ -32,12 +32,15 @@ interface PlaceRow {
   values: string[];
 }
 
+type RawPlace = Parameters<typeof resolveFixedFieldDisplay>[0];
+
 export default function ListePage() {
   const [lists, setLists] = useState<ListOverview[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ListDetail | null>(null);
   const [columns, setColumns] = useState<{ key: string; label: string }[]>([]);
   const [places, setPlaces] = useState<PlaceRow[]>([]);
+  const [samplePlace, setSamplePlace] = useState<RawPlace | null>(null);
   const [newListOpen, setNewListOpen] = useState(false);
   const [attrsOpen, setAttrsOpen] = useState(false);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
@@ -51,12 +54,14 @@ export default function ListePage() {
   }, []);
 
   const loadDetail = useCallback(async (id: string) => {
-    const [detailRes, placesRes] = await Promise.all([
+    const [detailRes, placesRes, rawPlacesRes] = await Promise.all([
       fetch(`/api/lists/${id}`),
       fetch(`/api/lists/${id}/places`),
+      fetch(`/api/places?listId=${id}`),
     ]);
     const detailData = await detailRes.json();
     const placesData = await placesRes.json();
+    const rawPlacesData = await rawPlacesRes.json();
     setDetail({
       id: detailData.list.id,
       name: detailData.list.name,
@@ -66,6 +71,7 @@ export default function ListePage() {
     });
     setColumns(placesData.visibleColumns ?? []);
     setPlaces(placesData.places ?? []);
+    setSamplePlace(rawPlacesData.places?.[0] ?? null);
   }, []);
 
   useEffect(() => {
@@ -109,6 +115,7 @@ export default function ListePage() {
             listId={detail.id}
             attributes={detail.attributes}
             visibleFields={detail.visibleFields}
+            samplePlace={samplePlace}
             onChanged={() => loadDetail(detail.id)}
           />
         )}

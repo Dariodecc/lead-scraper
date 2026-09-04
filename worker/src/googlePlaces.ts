@@ -40,6 +40,7 @@ export async function nearbySearchPlaceIds(params: {
   lng: number;
   radiusM: number;
   includedType: string;
+  maxResultCount?: number;
 }): Promise<string[]> {
   const radius = Math.min(params.radiusM, MAX_RADIUS_M);
   const res = await fetch(`${PLACES_BASE}/places:searchNearby`, {
@@ -51,7 +52,7 @@ export async function nearbySearchPlaceIds(params: {
     },
     body: JSON.stringify({
       includedTypes: [params.includedType],
-      maxResultCount: NEARBY_MAX_RESULTS,
+      maxResultCount: params.maxResultCount ?? NEARBY_MAX_RESULTS,
       locationRestriction: {
         circle: { center: { latitude: params.lat, longitude: params.lng }, radius },
       },

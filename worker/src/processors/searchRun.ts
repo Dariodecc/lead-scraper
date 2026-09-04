@@ -1,6 +1,6 @@
 import type { Job } from "bullmq";
 import { PrismaClient } from "@prisma/client";
-import { nearbySearchPlaceIds, getPlaceDetails } from "../googlePlaces";
+import { nearbySearchPlaceIds, getPlaceDetails, NEARBY_MAX_RESULTS } from "../googlePlaces";
 import { checkWebsiteStatus } from "../websiteCheck";
 import { estimateOpening } from "../lib/openingEstimate";
 import { getBucketThresholds, getQuotaCap } from "../settings";
@@ -20,11 +20,64 @@ interface SearchRunJobData {
 // basta; sopra, si copre l'area con una griglia di celle da CELL_RADIUS_M.
 const CELL_RADIUS_M = 3000;
 const MAX_GRID_CELLS = 30;
+// Se una cella (o una zona senza griglia) tocca esattamente il tetto di 20, è quasi certamente
+// troncata (successo confermato su una vera zona satura, es. centro Milano) — si suddivide in 4
+// sotto-celle a raggio dimezzato e si ripete, fino a questa profondità massima.
+const MAX_SUBDIVIDE_DEPTH = 2;
+// TEST (§7.2): serve solo a vedere quali campi si popolano per scegliere le colonne — non una
+// scansione completa. Poche candidate, ci si ferma al primo risultato davvero nuovo.
+const TEST_CANDIDATE_COUNT = 5;
 
 async function googleApiCallsUsedToday(): Promise<number> {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   return db.log.count({ where: { category: "google_api", createdAt: { gte: startOfDay } } });
+}
+
+async function collectCellPlaceIds(params: {
+  lat: number;
+  lng: number;
+  radiusM: number;
+  includedType: string;
+  depth: number;
+  searchId: string;
+  idSet: Set<string>;
+}): Promise<void> {
+  const { lat, lng, radiusM, includedType, depth, searchId, idSet } = params;
+  const ids = await nearbySearchPlaceIds({ lat, lng, radiusM, includedType });
+
+  if (ids.length < NEARBY_MAX_RESULTS || depth >= MAX_SUBDIVIDE_DEPTH) {
+    ids.forEach((id) => idSet.add(id));
+    return;
+  }
+
+  // Tetto toccato: zona satura, si suddivide invece di accettare un troncamento silenzioso.
+  await log(
+    "warning",
+    "google_api",
+    `Zona densa (${ids.length} risultati su raggio ${Math.round(radiusM)}m) — suddivido in 4 sotto-zone`,
+    { searchId },
+  );
+  const subRadius = radiusM / 2;
+  const metersPerDegLat = 111_320;
+  const metersPerDegLng = 111_320 * Math.cos((lat * Math.PI) / 180);
+  const offsets: [number, number][] = [
+    [-1, -1],
+    [-1, 1],
+    [1, -1],
+    [1, 1],
+  ];
+  for (const [dx, dy] of offsets) {
+    await collectCellPlaceIds({
+      lat: lat + (dy * subRadius) / metersPerDegLat,
+      lng: lng + (dx * subRadius) / metersPerDegLng,
+      radiusM: subRadius,
+      includedType,
+      depth: depth + 1,
+      searchId,
+      idSet,
+    });
+  }
 }
 
 export async function processSearchRun(job: Job<SearchRunJobData>) {
@@ -34,6 +87,7 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
   });
   if (!run) return;
   const search = run.search;
+  const isTest = run.isTest;
 
   if (!search.listId) {
     // Non dovrebbe accadere: /api/searches/:id/test crea/collega sempre una lista prima di
@@ -70,49 +124,66 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
   try {
     const centerLat = Number(search.areaLat);
     const centerLng = Number(search.areaLng);
-    const { cells, truncated } = generateGrid(
-      centerLat,
-      centerLng,
-      search.areaRadiusM,
-      CELL_RADIUS_M,
-      MAX_GRID_CELLS,
-    );
-
-    if (cells.length > 1) {
-      await log(
-        "info",
-        "google_api",
-        `Copertura a griglia: ${cells.length} zone da ${CELL_RADIUS_M / 1000}km da scansionare` +
-          (truncated ? ` (area troppo ampia, coperto solo il centro entro ${MAX_GRID_CELLS} celle)` : ""),
-        { searchId: search.id },
-      );
-    }
-
     const placeIdSet = new Set<string>();
-    for (const cell of cells) {
-      const usedNow = await googleApiCallsUsedToday();
-      if (usedNow >= quotaCap) {
-        await log(
-          "warning",
-          "google_api",
-          "Quota giornaliera raggiunta a metà run — copertura griglia interrotta",
-          { searchId: search.id },
-        );
-        break;
-      }
+
+    if (isTest) {
+      // Solo un piccolo campione dal centro zona — niente griglia, niente suddivisione: il TEST
+      // serve a vedere i campi disponibili, non a scansionare l'area (§7.2).
       const ids = await nearbySearchPlaceIds({
-        lat: cell.lat,
-        lng: cell.lng,
-        radiusM: cells.length > 1 ? CELL_RADIUS_M : search.areaRadiusM,
+        lat: centerLat,
+        lng: centerLng,
+        radiusM: search.areaRadiusM,
         includedType: search.categoryPlaceType,
+        maxResultCount: TEST_CANDIDATE_COUNT,
       });
       ids.forEach((id) => placeIdSet.add(id));
+    } else {
+      const { cells, truncated } = generateGrid(
+        centerLat,
+        centerLng,
+        search.areaRadiusM,
+        CELL_RADIUS_M,
+        MAX_GRID_CELLS,
+      );
+
+      if (cells.length > 1) {
+        await log(
+          "info",
+          "google_api",
+          `Copertura a griglia: ${cells.length} zone da ${CELL_RADIUS_M / 1000}km da scansionare` +
+            (truncated ? ` (area troppo ampia, coperto solo il centro entro ${MAX_GRID_CELLS} celle)` : ""),
+          { searchId: search.id },
+        );
+      }
+
+      for (const cell of cells) {
+        const usedNow = await googleApiCallsUsedToday();
+        if (usedNow >= quotaCap) {
+          await log(
+            "warning",
+            "google_api",
+            "Quota giornaliera raggiunta a metà run — copertura griglia interrotta",
+            { searchId: search.id },
+          );
+          break;
+        }
+        await collectCellPlaceIds({
+          lat: cell.lat,
+          lng: cell.lng,
+          radiusM: cells.length > 1 ? CELL_RADIUS_M : search.areaRadiusM,
+          includedType: search.categoryPlaceType,
+          depth: 0,
+          searchId: search.id,
+          idSet: placeIdSet,
+        });
+      }
     }
+
     const placeIds = [...placeIdSet];
     await log(
       "info",
       "google_api",
-      `Nearby Search: ${placeIds.length} risultati unici` + (cells.length > 1 ? ` su ${cells.length} zone` : ""),
+      `Nearby Search: ${placeIds.length} risultati unici`,
       { searchId: search.id },
     );
 
@@ -165,6 +236,8 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
       });
       newCount++;
       await enqueueWebhookDelivery(place.id);
+
+      if (isTest && newCount >= 1) break; // un solo esempio nuovo basta per mappare i campi
     }
 
     await db.searchRun.update({
