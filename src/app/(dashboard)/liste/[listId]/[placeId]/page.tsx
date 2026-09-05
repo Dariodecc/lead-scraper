@@ -112,6 +112,21 @@ function CustomValueInput({
     );
   }
 
+  if (attribute.type === "text") {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <textarea
+          rows={4}
+          className={`${inputClass} h-auto py-2.5`}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+        />
+        {saved && <span className="text-xs text-success">Salvato ✓</span>}
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-2">
       <input

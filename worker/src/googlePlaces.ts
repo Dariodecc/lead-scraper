@@ -13,7 +13,7 @@ export const NEARBY_MAX_RESULTS = 20;
 export const MAX_RADIUS_M = 50000;
 
 const DETAILS_FIELD_MASK =
-  "id,displayName,formattedAddress,location,nationalPhoneNumber,primaryType,websiteUri,rating,userRatingCount,priceLevel,businessStatus,regularOpeningHours,reviews,openingDate";
+  "id,displayName,formattedAddress,location,nationalPhoneNumber,internationalPhoneNumber,primaryType,websiteUri,rating,userRatingCount,priceLevel,businessStatus,regularOpeningHours,reviews,openingDate";
 
 interface NearbySearchResponse {
   places?: { id: string }[];
@@ -25,6 +25,7 @@ interface PlaceDetailsResponse {
   formattedAddress?: string;
   location?: { latitude: number; longitude: number };
   nationalPhoneNumber?: string;
+  internationalPhoneNumber?: string;
   primaryType?: string;
   websiteUri?: string;
   rating?: number;
@@ -125,7 +126,9 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetailsResu
     address: data.formattedAddress ?? "",
     lat: data.location?.latitude ?? 0,
     lng: data.location?.longitude ?? 0,
-    phone: data.nationalPhoneNumber ?? null,
+    // Prefisso internazionale sempre incluso, nessuno spazio — internationalPhoneNumber è tipo
+    // "+39 035 346261", nationalPhoneNumber (fallback se manca) non ha prefisso.
+    phone: (data.internationalPhoneNumber ?? data.nationalPhoneNumber ?? "").replace(/\s+/g, "") || null,
     category: data.primaryType ?? null,
     websiteUrl: data.websiteUri ?? null,
     rating: data.rating ?? null,
