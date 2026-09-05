@@ -1,8 +1,18 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { SearchDrawer, type SearchRecord, type ListSummary } from "@/components/ricerche/search-drawer";
+import { useRouter } from "next/navigation";
 import { placeTypeLabel } from "@/lib/placeTypes";
+
+interface SearchRow {
+  id: string;
+  title: string;
+  areaLabel: string;
+  categoryPlaceType: string;
+  frequency: "once" | "weekly" | "monthly";
+  status: "draft" | "active" | "paused";
+  listId: string | null;
+}
 
 const COLUMNS = ["Titolo", "Zona", "Categoria", "Frequenza", "Stato", "Prossima", "Azioni"] as const;
 
@@ -10,27 +20,14 @@ const STATUS_LABEL: Record<string, string> = { draft: "Bozza", active: "Attiva",
 const FREQ_LABEL: Record<string, string> = { once: "Una tantum", weekly: "Settimanale", monthly: "Mensile" };
 
 export default function RicerchePage() {
-  const [searches, setSearches] = useState<SearchRecord[]>([]);
-  const [lists, setLists] = useState<ListSummary[]>([]);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editing, setEditing] = useState<SearchRecord | null>(null);
+  const router = useRouter();
+  const [searches, setSearches] = useState<SearchRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [searchesRes, listsRes] = await Promise.all([fetch("/api/searches"), fetch("/api/lists")]);
-    const searchesData = await searchesRes.json();
-    const listsData = await listsRes.json();
-
-    setSearches(searchesData.searches ?? []);
-
-    const listsWithAttrs = await Promise.all(
-      (listsData.lists ?? []).map(async (l: { id: string }) => {
-        const res = await fetch(`/api/lists/${l.id}`);
-        const data = await res.json();
-        return { id: data.list.id, name: data.list.name, attributes: data.list.attributes };
-      }),
-    );
-    setLists(listsWithAttrs);
+    const res = await fetch("/api/searches");
+    const data = await res.json();
+    setSearches(data.searches ?? []);
     setLoading(false);
   }, []);
 
@@ -39,7 +36,8 @@ export default function RicerchePage() {
     load();
   }, [load]);
 
-  async function toggleStatus(s: SearchRecord) {
+  async function toggleStatus(s: SearchRow, e: React.MouseEvent) {
+    e.stopPropagation();
     if (s.status === "draft" && !s.listId) return;
     const nextStatus = s.status === "active" ? "paused" : "active";
     const res = await fetch(`/api/searches/${s.id}`, {
@@ -50,7 +48,7 @@ export default function RicerchePage() {
     if (res.ok) load();
   }
 
-  async function runTest(s: SearchRecord, e: React.MouseEvent) {
+  async function runTest(s: SearchRow, e: React.MouseEvent) {
     e.stopPropagation();
     await fetch(`/api/searches/${s.id}/test`, { method: "POST" });
     load();
@@ -62,15 +60,12 @@ export default function RicerchePage() {
         <div>
           <h1 className="mb-1.5 text-[28px] font-semibold tracking-tight">Ricerche</h1>
           <p className="text-sm text-muted-foreground">
-            Zona e categoria da liste compatibili con Google Places, frequenza e webhook per ricerca
+            Zona e categoria da liste compatibili con Google Places, frequenza per ricerca
           </p>
         </div>
         <button
           className="h-10 rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground"
-          onClick={() => {
-            setEditing(null);
-            setDrawerOpen(true);
-          }}
+          onClick={() => router.push("/ricerche/new")}
         >
           + Nuova ricerca
         </button>
@@ -98,10 +93,7 @@ export default function RicerchePage() {
           <div
             key={s.id}
             className="grid cursor-pointer grid-cols-[1.7fr_1fr_1fr_0.85fr_0.75fr_1fr_1.6fr] items-center gap-x-3 border-b border-hairline-soft px-5 py-4"
-            onClick={() => {
-              setEditing(s);
-              setDrawerOpen(true);
-            }}
+            onClick={() => router.push(`/ricerche/${s.id}`)}
           >
             <span className="truncate text-sm font-medium" title={s.title}>
               {s.title}
@@ -133,10 +125,7 @@ export default function RicerchePage() {
               <button
                 disabled={s.status === "draft" && !s.listId}
                 className="rounded-md border border-border bg-background px-2 py-1.5 text-[11.5px] font-semibold whitespace-nowrap disabled:opacity-40"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleStatus(s);
-                }}
+                onClick={(e) => toggleStatus(s, e)}
               >
                 {s.status === "active" ? "Pausa" : "Attiva"}
               </button>
@@ -144,14 +133,6 @@ export default function RicerchePage() {
           </div>
         ))}
       </div>
-
-      <SearchDrawer
-        open={drawerOpen}
-        search={editing}
-        lists={lists}
-        onClose={() => setDrawerOpen(false)}
-        onSaved={load}
-      />
     </div>
   );
 }

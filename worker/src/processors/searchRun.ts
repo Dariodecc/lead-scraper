@@ -3,12 +3,12 @@ import { PrismaClient } from "@prisma/client";
 import { nearbySearchPlaceIds, getPlaceDetails, NEARBY_MAX_RESULTS } from "../googlePlaces";
 import { checkWebsiteStatus } from "../websiteCheck";
 import { estimateOpening } from "../lib/openingEstimate";
-import { getBucketThresholds, getQuotaCap } from "../settings";
+import { getBucketThresholds, getQuotaCap, getGoogleCostRates } from "../settings";
 import { enqueueWebhookDelivery } from "../queue";
 import { makeLogger } from "../log";
 import { generateGrid } from "../grid";
 import { evaluateDeliveryRules, type DeliveryRules } from "../deliveryRules";
-import { analyzeWebsite, AI_ANALYSIS_ATTR_KEY, AI_SCORE_ATTR_KEY } from "../aiAnalysis";
+import { runAiAnalysisForPlace, ensureAiAttributes } from "../aiAnalysis";
 
 const db = new PrismaClient();
 const log = makeLogger(db);
@@ -44,9 +44,11 @@ async function collectCellPlaceIds(params: {
   depth: number;
   searchId: string;
   idSet: Set<string>;
+  callCounter: { count: number };
 }): Promise<void> {
-  const { lat, lng, radiusM, includedType, depth, searchId, idSet } = params;
+  const { lat, lng, radiusM, includedType, depth, searchId, idSet, callCounter } = params;
   const ids = await nearbySearchPlaceIds({ lat, lng, radiusM, includedType });
+  callCounter.count++;
 
   if (ids.length < NEARBY_MAX_RESULTS || depth >= MAX_SUBDIVIDE_DEPTH) {
     ids.forEach((id) => idSet.add(id));
@@ -78,31 +80,9 @@ async function collectCellPlaceIds(params: {
       depth: depth + 1,
       searchId,
       idSet,
+      callCounter,
     });
   }
-}
-
-/** Crea (se assenti) i due campi custom ben noti per l'analisi AI e ritorna i loro id. */
-async function ensureAiAttributes(listId: string): Promise<{ analysisAttrId: string; scoreAttrId: string }> {
-  const [analysisAttr, scoreAttr] = await Promise.all([
-    db.listAttribute.upsert({
-      where: { listId_key: { listId, key: AI_ANALYSIS_ATTR_KEY } },
-      create: { listId, key: AI_ANALYSIS_ATTR_KEY, name: "Analisi", type: "text", position: 100 },
-      update: {},
-    }),
-    db.listAttribute.upsert({
-      where: { listId_key: { listId, key: AI_SCORE_ATTR_KEY } },
-      create: {
-        listId,
-        key: AI_SCORE_ATTR_KEY,
-        name: "Punteggio contattabilità",
-        type: "number",
-        position: 101,
-      },
-      update: {},
-    }),
-  ]);
-  return { analysisAttrId: analysisAttr.id, scoreAttrId: scoreAttr.id };
 }
 
 export async function processSearchRun(job: Job<SearchRunJobData>) {
@@ -136,7 +116,8 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
     return;
   }
   const deliveryRules = list.deliveryRules as DeliveryRules | null;
-  const aiAttrs = list.aiAnalysisEnabled ? await ensureAiAttributes(list.id) : null;
+  if (list.aiAnalysisEnabled) await ensureAiAttributes(db, list.id);
+  const googleCostRates = await getGoogleCostRates();
 
   const quotaCap = await getQuotaCap();
   const usedToday = await googleApiCallsUsedToday();
@@ -161,6 +142,7 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
     const centerLat = Number(search.areaLat);
     const centerLng = Number(search.areaLng);
     const placeIdSet = new Set<string>();
+    const nearbyCallCounter = { count: 0 };
 
     if (isTest) {
       // Solo un piccolo campione dal centro zona — niente griglia, niente suddivisione: il TEST
@@ -172,6 +154,7 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
         includedType: search.categoryPlaceType,
         maxResultCount: TEST_CANDIDATE_COUNT,
       });
+      nearbyCallCounter.count++;
       ids.forEach((id) => placeIdSet.add(id));
     } else {
       const { cells, truncated } = generateGrid(
@@ -211,14 +194,18 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
           depth: 0,
           searchId: search.id,
           idSet: placeIdSet,
+          callCounter: nearbyCallCounter,
         });
       }
     }
 
     const placeIds = [...placeIdSet];
-    await log("info", "google_api", `Nearby Search: ${placeIds.length} risultati unici`, {
-      searchId: search.id,
-    });
+    await log(
+      "info",
+      "google_api",
+      `Nearby Search: ${placeIds.length} risultati unici (${nearbyCallCounter.count} chiamate)`,
+      { searchId: search.id, costUsd: nearbyCallCounter.count * googleCostRates.nearbySearch },
+    );
 
     const thresholds = await getBucketThresholds();
     let newCount = 0;
@@ -232,7 +219,10 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
       }
 
       const details = await getPlaceDetails(placeId);
-      await log("info", "google_api", `Place Details: ${details.businessName}`, { searchId: search.id });
+      await log("info", "google_api", `Place Details: ${details.businessName}`, {
+        searchId: search.id,
+        costUsd: googleCostRates.placeDetails,
+      });
 
       const websiteCheck = details.websiteUrl
         ? await checkWebsiteStatus(details.websiteUrl)
@@ -283,43 +273,19 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
       });
       newCount++;
 
-      if (aiAttrs) {
-        const result = await analyzeWebsite({
-          businessName: place.businessName,
-          category: place.category,
-          websiteUrl: place.websiteUrl,
+      // Gate analisi→consegna: se l'AI è attiva per questa lista, la consegna al webhook parte
+      // SOLO se l'analisi ha successo — se fallisce (es. OpenAI senza credito) il place resta
+      // "failed" e va rilanciato manualmente da Logs ("Riprova adesso"), niente retry automatico.
+      if (list.aiAnalysisEnabled) {
+        const aiOk = await runAiAnalysisForPlace(db, place, list, {
           heuristicWebsiteStatus: websiteStatus,
-          rating: details.rating,
-          reviewCount: details.reviewCount,
-          priceLevel: details.priceLevel,
-          estimatedOpeningWindow: bucket,
-          estimationConfidence: confidence,
           pageText: websiteCheck.pageText,
+          searchId: search.id,
         });
-        if (result) {
-          // Il giudizio AI (basato sul testo vero della pagina) sostituisce l'euristica Playwright
-          // (solo meta viewport, soggetta a falsi positivi sui siti con protezioni anti-bot).
-          if (result.websiteStatus) place.websiteStatus = result.websiteStatus;
-
-          await db.$transaction([
-            db.placeCustomValue.upsert({
-              where: {
-                listAttributeId_placeId: { listAttributeId: aiAttrs.analysisAttrId, placeId: place.id },
-              },
-              create: { listAttributeId: aiAttrs.analysisAttrId, placeId: place.id, value: result.analysis },
-              update: { value: result.analysis },
-            }),
-            db.placeCustomValue.upsert({
-              where: {
-                listAttributeId_placeId: { listAttributeId: aiAttrs.scoreAttrId, placeId: place.id },
-              },
-              create: { listAttributeId: aiAttrs.scoreAttrId, placeId: place.id, value: result.score },
-              update: { value: result.score },
-            }),
-            ...(result.websiteStatus
-              ? [db.place.update({ where: { id: place.id }, data: { websiteStatus: result.websiteStatus } })]
-              : []),
-          ]);
+        if (!aiOk) {
+          await db.place.update({ where: { id: place.id }, data: { deliveryStatus: "failed" } });
+          if (isTest && newCount >= 1) break;
+          continue;
         }
       }
 

@@ -4,8 +4,6 @@ import { decryptSecret } from "./crypto";
 const KEYS = {
   googleApiKey: "google_places_api_key",
   quotaCap: "google_places_quota_cap",
-  defaultWebhookUrl: "default_webhook_url",
-  defaultWebhookSecret: "default_webhook_secret",
   bucketThresholds: "bucket_thresholds",
 } as const;
 
@@ -29,11 +27,6 @@ export async function getGoogleApiKey(): Promise<string> {
 export async function getQuotaCap(): Promise<number> {
   const v = await read(KEYS.quotaCap);
   return v ? Number(v) : 500;
-}
-
-export async function getDefaultWebhook(): Promise<{ url: string | null; secret: string | null }> {
-  const [url, secret] = await Promise.all([read(KEYS.defaultWebhookUrl), read(KEYS.defaultWebhookSecret)]);
-  return { url, secret };
 }
 
 export async function getBucketThresholds(): Promise<{ b1: number; b2: number; b3: number }> {

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { encryptSecret } from "@/lib/crypto";
 import { computeNextRunAt } from "@/lib/scheduling";
 import { placeTypeLabel } from "@/lib/placeTypes";
 
@@ -52,11 +51,6 @@ export async function POST(req: Request) {
       scheduleTime: time,
       nextRunAt,
       listId: body.listId || null,
-      outboundWebhookUrl: body.outboundWebhookUrl || null,
-      outboundWebhookSecretEncrypted: body.outboundWebhookSecret
-        ? encryptSecret(body.outboundWebhookSecret)
-        : null,
-      outboundFields: body.outboundFields ?? null,
       status: "draft",
     },
   });

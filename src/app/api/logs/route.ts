@@ -15,6 +15,9 @@ export async function GET(req: Request) {
   const searchId = url.searchParams.get("searchId");
   if (searchId) where.searchId = searchId;
 
+  const placeId = url.searchParams.get("placeId");
+  if (placeId) where.placeId = placeId;
+
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
   if (from || to) {
@@ -24,12 +27,19 @@ export async function GET(req: Request) {
     };
   }
 
-  const logs = await db.log.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: 200,
-    include: { search: { select: { title: true } } },
-  });
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+  const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get("pageSize") ?? 25)));
 
-  return NextResponse.json({ logs });
+  const [logs, total] = await Promise.all([
+    db.log.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: { search: { select: { title: true } } },
+    }),
+    db.log.count({ where }),
+  ]);
+
+  return NextResponse.json({ logs, page, pageSize, total, totalPages: Math.ceil(total / pageSize) });
 }

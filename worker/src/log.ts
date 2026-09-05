@@ -5,7 +5,12 @@ export function makeLogger(db: PrismaClient) {
     level: LogLevel,
     category: LogCategory,
     message: string,
-    extra: { searchId?: string | null; placeId?: string | null; payload?: unknown } = {},
+    extra: {
+      searchId?: string | null;
+      placeId?: string | null;
+      payload?: unknown;
+      costUsd?: number | null;
+    } = {},
   ) {
     return db.log.create({
       data: {
@@ -15,6 +20,7 @@ export function makeLogger(db: PrismaClient) {
         searchId: extra.searchId ?? undefined,
         placeId: extra.placeId ?? undefined,
         payload: extra.payload as never,
+        costUsd: extra.costUsd ?? undefined,
       },
     });
   };

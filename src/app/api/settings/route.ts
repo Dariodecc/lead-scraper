@@ -5,10 +5,12 @@ import { encryptSecret, decryptSecret, isSecretSet } from "@/lib/crypto";
 const KEYS = {
   googleApiKey: "google_places_api_key",
   quotaCap: "google_places_quota_cap",
-  defaultWebhookUrl: "default_webhook_url",
-  defaultWebhookSecret: "default_webhook_secret",
   bucketThresholds: "bucket_thresholds",
   openAiApiKey: "openai_api_key",
+  googleNearbySearchCostPerCall: "google_nearby_search_cost_per_call",
+  googlePlaceDetailsCostPerCall: "google_place_details_cost_per_call",
+  openAiInputCostPer1M: "openai_input_cost_per_1m",
+  openAiOutputCostPer1M: "openai_output_cost_per_1m",
 } as const;
 
 async function getSetting(key: string) {
@@ -17,24 +19,29 @@ async function getSetting(key: string) {
 }
 
 export async function GET() {
-  const [apiKey, quotaCap, webhookUrl, webhookSecret, thresholds, openAiKey] = await Promise.all([
-    getSetting(KEYS.googleApiKey),
-    getSetting(KEYS.quotaCap),
-    getSetting(KEYS.defaultWebhookUrl),
-    getSetting(KEYS.defaultWebhookSecret),
-    getSetting(KEYS.bucketThresholds),
-    getSetting(KEYS.openAiApiKey),
-  ]);
+  const [apiKey, quotaCap, thresholds, openAiKey, nearbyCost, detailsCost, inputCost, outputCost] =
+    await Promise.all([
+      getSetting(KEYS.googleApiKey),
+      getSetting(KEYS.quotaCap),
+      getSetting(KEYS.bucketThresholds),
+      getSetting(KEYS.openAiApiKey),
+      getSetting(KEYS.googleNearbySearchCostPerCall),
+      getSetting(KEYS.googlePlaceDetailsCostPerCall),
+      getSetting(KEYS.openAiInputCostPer1M),
+      getSetting(KEYS.openAiOutputCostPer1M),
+    ]);
 
   return NextResponse.json({
     hasApiKey: isSecretSet(apiKey),
     quotaCap: quotaCap ? Number(decryptSecret(quotaCap)) : 500,
-    defaultWebhookUrl: webhookUrl ? decryptSecret(webhookUrl) : "",
-    hasDefaultWebhookSecret: isSecretSet(webhookSecret),
     bucketThresholds: thresholds
       ? JSON.parse(decryptSecret(thresholds))
       : { b1: 4, b2: 8, b3: 12 },
     hasOpenAiApiKey: isSecretSet(openAiKey),
+    googleNearbySearchCostPerCall: nearbyCost ? Number(decryptSecret(nearbyCost)) : 0.032,
+    googlePlaceDetailsCostPerCall: detailsCost ? Number(decryptSecret(detailsCost)) : 0.04,
+    openAiInputCostPer1M: inputCost ? Number(decryptSecret(inputCost)) : 0.15,
+    openAiOutputCostPer1M: outputCost ? Number(decryptSecret(outputCost)) : 0.6,
   });
 }
 
@@ -55,17 +62,23 @@ export async function PATCH(req: Request) {
   if (body.quotaCap != null) {
     writes.push(upsert(KEYS.quotaCap, String(body.quotaCap)));
   }
-  if (typeof body.defaultWebhookUrl === "string") {
-    writes.push(upsert(KEYS.defaultWebhookUrl, body.defaultWebhookUrl));
-  }
-  if (typeof body.defaultWebhookSecret === "string" && body.defaultWebhookSecret.length > 0) {
-    writes.push(upsert(KEYS.defaultWebhookSecret, body.defaultWebhookSecret));
-  }
   if (body.bucketThresholds) {
     writes.push(upsert(KEYS.bucketThresholds, JSON.stringify(body.bucketThresholds)));
   }
   if (typeof body.openAiApiKey === "string" && body.openAiApiKey.length > 0) {
     writes.push(upsert(KEYS.openAiApiKey, body.openAiApiKey));
+  }
+  if (body.googleNearbySearchCostPerCall != null) {
+    writes.push(upsert(KEYS.googleNearbySearchCostPerCall, String(body.googleNearbySearchCostPerCall)));
+  }
+  if (body.googlePlaceDetailsCostPerCall != null) {
+    writes.push(upsert(KEYS.googlePlaceDetailsCostPerCall, String(body.googlePlaceDetailsCostPerCall)));
+  }
+  if (body.openAiInputCostPer1M != null) {
+    writes.push(upsert(KEYS.openAiInputCostPer1M, String(body.openAiInputCostPer1M)));
+  }
+  if (body.openAiOutputCostPer1M != null) {
+    writes.push(upsert(KEYS.openAiOutputCostPer1M, String(body.openAiOutputCostPer1M)));
   }
 
   await Promise.all(writes);

@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { NewListDrawer } from "@/components/liste/new-list-drawer";
 import { AttributesPanel, type ListAttribute } from "@/components/liste/attributes-panel";
-import { PlaceDrawer } from "@/components/liste/place-drawer";
 import { DELIVERY_STATUS_LABEL, resolveFixedFieldDisplay } from "@/lib/placeFields";
 import type { DeliveryRules } from "@/lib/deliveryRules";
 
@@ -27,6 +27,10 @@ interface ListDetail {
   deliveryRules: DeliveryRules | null;
   excludeChainsThreshold: number | null;
   aiAnalysisEnabled: boolean;
+  aiPromptMd: string | null;
+  outboundWebhookUrl: string | null;
+  hasOutboundWebhookSecret: boolean;
+  outboundFields: string[] | null;
 }
 
 interface PlaceRow {
@@ -55,6 +59,7 @@ const STATUS_BADGE_CLASS: Record<string, string> = {
 };
 
 export default function ListePage() {
+  const router = useRouter();
   const [lists, setLists] = useState<ListOverview[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ListDetail | null>(null);
@@ -63,7 +68,6 @@ export default function ListePage() {
   const [samplePlace, setSamplePlace] = useState<RawPlace | null>(null);
   const [newListOpen, setNewListOpen] = useState(false);
   const [attrsOpen, setAttrsOpen] = useState(false);
-  const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [page, setPage] = useState(1);
@@ -99,6 +103,10 @@ export default function ListePage() {
       deliveryRules: detailData.list.deliveryRules ?? null,
       excludeChainsThreshold: detailData.list.excludeChainsThreshold ?? null,
       aiAnalysisEnabled: !!detailData.list.aiAnalysisEnabled,
+      aiPromptMd: detailData.list.aiPromptMd ?? null,
+      outboundWebhookUrl: detailData.list.outboundWebhookUrl ?? null,
+      hasOutboundWebhookSecret: !!detailData.list.hasOutboundWebhookSecret,
+      outboundFields: detailData.list.outboundFields ?? null,
     });
     setNameDraft(detailData.list.name);
     setColumns(placesData.visibleColumns ?? []);
@@ -112,6 +120,9 @@ export default function ListePage() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch dati iniziali al mount
     loadOverview();
+    // Torna dalla pagina di dettaglio di un'entry con la stessa lista già selezionata.
+    const listFromUrl = new URLSearchParams(window.location.search).get("list");
+    if (listFromUrl) setSelectedId(listFromUrl);
   }, [loadOverview]);
 
   useEffect(() => {
@@ -255,6 +266,10 @@ export default function ListePage() {
             deliveryRules={detail.deliveryRules}
             excludeChainsThreshold={detail.excludeChainsThreshold}
             aiAnalysisEnabled={detail.aiAnalysisEnabled}
+            aiPromptMd={detail.aiPromptMd}
+            outboundWebhookUrl={detail.outboundWebhookUrl}
+            hasOutboundWebhookSecret={detail.hasOutboundWebhookSecret}
+            outboundFields={detail.outboundFields}
             onChanged={() => loadDetail(detail.id, page, statusFilter)}
           />
         )}
@@ -327,7 +342,10 @@ export default function ListePage() {
                   checked={selectedRows.has(p.id)}
                   onChange={() => toggleRow(p.id)}
                 />
-                <span className="cursor-pointer" onClick={() => setSelectedPlaceId(p.id)}>
+                <span
+                  className="cursor-pointer"
+                  onClick={() => router.push(`/liste/${detail.id}/${p.id}`)}
+                >
                   <div className="truncate text-sm font-medium">{p.name}</div>
                   <div className="truncate text-xs text-muted-soft">{p.address}</div>
                 </span>
@@ -376,7 +394,6 @@ export default function ListePage() {
           </div>
         </div>
 
-        <PlaceDrawer placeId={selectedPlaceId} onClose={() => setSelectedPlaceId(null)} />
       </div>
     );
   }

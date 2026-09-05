@@ -23,17 +23,36 @@ function emptyCondition(): DeliveryRuleCondition {
   return { field: DELIVERY_RULE_FIELDS[0].key, operator: "eq", value: "" };
 }
 
+const AI_PROMPT_PLACEHOLDER = `Sei un analista che valuta se contattare questa attività come potenziale cliente per servizi di siti web/marketing.
+
+Valuta in particolare: [scrivi qui i tuoi criteri specifici, es. settore, zona, dimensione].
+
+Rispondi SOLO con un oggetto JSON valido con questi campi:
+- "website_status": uno tra "none", "outdated", "ok"
+- "analysis": una brevissima analisi in italiano (massimo 2 frasi)
+- "score": punteggio contattabilità da 0 a 10`;
+
 function DeliveryFilterSection({
   listId,
   initialRules,
   initialChainThreshold,
   initialAiEnabled,
+  initialAiPromptMd,
+  initialWebhookUrl,
+  initialHasWebhookSecret,
+  initialOutboundFields,
+  attributes,
   onChanged,
 }: {
   listId: string;
   initialRules: DeliveryRules | null;
   initialChainThreshold: number | null;
   initialAiEnabled: boolean;
+  initialAiPromptMd: string | null;
+  initialWebhookUrl: string | null;
+  initialHasWebhookSecret: boolean;
+  initialOutboundFields: string[] | null;
+  attributes: ListAttribute[];
   onChanged: () => void;
 }) {
   const [conditions, setConditions] = useState<DeliveryRuleCondition[]>(
@@ -43,10 +62,18 @@ function DeliveryFilterSection({
     initialChainThreshold != null ? String(initialChainThreshold) : "",
   );
   const [aiEnabled, setAiEnabled] = useState(initialAiEnabled);
+  const [aiPromptMd, setAiPromptMd] = useState(initialAiPromptMd ?? "");
+  const [webhookUrl, setWebhookUrl] = useState(initialWebhookUrl ?? "");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [outboundFields, setOutboundFields] = useState<string[]>(initialOutboundFields ?? []);
   const [saved, setSaved] = useState(false);
 
   function updateCondition(i: number, patch: Partial<DeliveryRuleCondition>) {
     setConditions((cs) => cs.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
+  }
+
+  function toggleOutboundField(key: string) {
+    setOutboundFields((fs) => (fs.includes(key) ? fs.filter((k) => k !== key) : [...fs, key]));
   }
 
   async function save() {
@@ -57,8 +84,13 @@ function DeliveryFilterSection({
         deliveryRules: conditions.length > 0 ? { conditions } : null,
         excludeChainsThreshold: chainThreshold.trim() ? Number(chainThreshold) : null,
         aiAnalysisEnabled: aiEnabled,
+        aiPromptMd: aiEnabled ? aiPromptMd : null,
+        outboundWebhookUrl: webhookUrl,
+        outboundWebhookSecret: webhookSecret || undefined,
+        outboundFields: outboundFields.length > 0 ? outboundFields : null,
       }),
     });
+    setWebhookSecret("");
     setSaved(true);
     setTimeout(() => setSaved(false), 1800);
     onChanged();
@@ -146,11 +178,87 @@ function DeliveryFilterSection({
         + Aggiungi condizione
       </button>
 
-      <label className="mb-4 flex items-center gap-2 text-[13px]">
+      <label className="mb-3 flex items-center gap-2 text-[13px]">
         <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} />
         Analisi AI del sito (OpenAI) — crea &ldquo;Analisi&rdquo; e &ldquo;Punteggio
-        contattabilità&rdquo; per ogni nuovo risultato (richiede la chiave in Impostazioni)
+        contattabilità&rdquo; per ogni nuovo risultato (richiede la chiave in Impostazioni). Se
+        l&apos;analisi fallisce, il risultato NON viene inviato al webhook.
       </label>
+      {aiEnabled && (
+        <div className="mb-5 rounded-md border border-border bg-background p-3.5">
+          <label className="mb-1.5 block text-[13px] font-medium">
+            Prompt di analisi personalizzato (Markdown)
+          </label>
+          <div className="mb-2 text-[11px] text-muted-soft">
+            Se compilato, <strong>sostituisce integralmente</strong> le istruzioni di default —
+            devi includere tu la richiesta di rispondere in JSON con i campi{" "}
+            <code>website_status</code> (none/outdated/ok), <code>analysis</code> (testo) e{" "}
+            <code>score</code> (0-10): se li ometti l&apos;analisi fallirà, con l&apos;errore
+            visibile nei Logs. I dati dell&apos;attività (nome, sito, rating, testo estratto dalla
+            pagina) vengono allegati automaticamente sotto al tuo prompt. Lascia vuoto per usare le
+            istruzioni di default.
+          </div>
+          <textarea
+            rows={10}
+            placeholder={AI_PROMPT_PLACEHOLDER}
+            className={`${inputClass} font-mono text-xs`}
+            value={aiPromptMd}
+            onChange={(e) => setAiPromptMd(e.target.value)}
+          />
+        </div>
+      )}
+
+      <div className="mb-5 border-t border-border pt-5">
+        <div className="mb-1 text-[13px] font-semibold">Webhook di questa lista</div>
+        <div className="mb-3.5 text-xs text-muted-soft">
+          Configurabile SOLO qui, per lista — nessun default globale né override per ricerca.
+        </div>
+        <input
+          type="text"
+          placeholder="https://crm.tuodominio.com/api/webhooks/lead-scraper"
+          className={`${inputClass} mb-3 font-mono`}
+          value={webhookUrl}
+          onChange={(e) => setWebhookUrl(e.target.value)}
+        />
+        <input
+          type="password"
+          placeholder={initialHasWebhookSecret ? "Secret già impostato — lascia vuoto per non cambiarlo" : "Shared secret"}
+          className={`${inputClass} mb-3.5`}
+          value={webhookSecret}
+          onChange={(e) => setWebhookSecret(e.target.value)}
+        />
+        <div className="mb-2 text-xs font-medium text-foreground/80">Campi da inviare nel payload</div>
+        <div className="flex flex-wrap gap-2">
+          {FIXED_PLACE_FIELDS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => toggleOutboundField(f.key)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+                outboundFields.includes(f.key)
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-background text-muted-foreground"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+          {attributes.map((a) => (
+            <button
+              key={a.key}
+              type="button"
+              onClick={() => toggleOutboundField(a.key)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+                outboundFields.includes(a.key)
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-background text-muted-foreground"
+              }`}
+            >
+              {a.name}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div>
         <button
@@ -175,6 +283,10 @@ export function AttributesPanel({
   deliveryRules,
   excludeChainsThreshold,
   aiAnalysisEnabled,
+  aiPromptMd,
+  outboundWebhookUrl,
+  hasOutboundWebhookSecret,
+  outboundFields,
   onChanged,
 }: {
   listId: string;
@@ -186,6 +298,10 @@ export function AttributesPanel({
   deliveryRules: DeliveryRules | null;
   excludeChainsThreshold: number | null;
   aiAnalysisEnabled: boolean;
+  aiPromptMd: string | null;
+  outboundWebhookUrl: string | null;
+  hasOutboundWebhookSecret: boolean;
+  outboundFields: string[] | null;
   onChanged: () => void;
 }) {
   const [name, setName] = useState("");
@@ -314,6 +430,11 @@ export function AttributesPanel({
         initialRules={deliveryRules}
         initialChainThreshold={excludeChainsThreshold}
         initialAiEnabled={aiAnalysisEnabled}
+        initialAiPromptMd={aiPromptMd}
+        initialWebhookUrl={outboundWebhookUrl}
+        initialHasWebhookSecret={hasOutboundWebhookSecret}
+        initialOutboundFields={outboundFields}
+        attributes={attributes}
         onChanged={onChanged}
       />
     </div>

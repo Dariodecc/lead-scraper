@@ -49,17 +49,20 @@ export default function ImpostazioniPage() {
   const [hasApiKey, setHasApiKey] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [quotaCap, setQuotaCap] = useState(500);
-  const [defaultWebhookUrl, setDefaultWebhookUrl] = useState("");
-  const [hasDefaultWebhookSecret, setHasDefaultWebhookSecret] = useState(false);
-  const [defaultWebhookSecret, setDefaultWebhookSecret] = useState("");
   const [bucketThresholds, setBucketThresholds] = useState({ b1: 4, b2: 8, b3: 12 });
   const [hasOpenAiApiKey, setHasOpenAiApiKey] = useState(false);
   const [openAiApiKey, setOpenAiApiKey] = useState("");
+  const [costRates, setCostRates] = useState({
+    googleNearbySearchCostPerCall: 0.032,
+    googlePlaceDetailsCostPerCall: 0.04,
+    openAiInputCostPer1M: 0.15,
+    openAiOutputCostPer1M: 0.6,
+  });
   const [savedFlags, setSavedFlags] = useState({
     api: false,
-    webhook: false,
     estimation: false,
     openai: false,
+    costs: false,
   });
 
   useEffect(() => {
@@ -68,10 +71,14 @@ export default function ImpostazioniPage() {
       .then((data) => {
         setHasApiKey(data.hasApiKey);
         setQuotaCap(data.quotaCap);
-        setDefaultWebhookUrl(data.defaultWebhookUrl ?? "");
-        setHasDefaultWebhookSecret(data.hasDefaultWebhookSecret);
         setBucketThresholds(data.bucketThresholds);
         setHasOpenAiApiKey(data.hasOpenAiApiKey);
+        setCostRates({
+          googleNearbySearchCostPerCall: data.googleNearbySearchCostPerCall,
+          googlePlaceDetailsCostPerCall: data.googlePlaceDetailsCostPerCall,
+          openAiInputCostPer1M: data.openAiInputCostPer1M,
+          openAiOutputCostPer1M: data.openAiOutputCostPer1M,
+        });
       });
   }, []);
 
@@ -93,20 +100,13 @@ export default function ImpostazioniPage() {
     flash("api");
   }
 
-  async function saveWebhook() {
+  async function saveCostRates() {
     await fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        defaultWebhookUrl,
-        defaultWebhookSecret: defaultWebhookSecret || undefined,
-      }),
+      body: JSON.stringify(costRates),
     });
-    if (defaultWebhookSecret) {
-      setHasDefaultWebhookSecret(true);
-      setDefaultWebhookSecret("");
-    }
-    flash("webhook");
+    flash("costs");
   }
 
   async function saveEstimation() {
@@ -136,8 +136,8 @@ export default function ImpostazioniPage() {
       <div className="mb-6">
         <h1 className="mb-1.5 text-[28px] font-semibold tracking-tight">Impostazioni</h1>
         <p className="text-sm text-muted-foreground">
-          Chiavi API, webhook di default, stima apertura e documentazione — gli Attributi si
-          configurano per singola lista
+          Chiavi API, costi, stima apertura e documentazione — webhook e Attributi si configurano
+          per singola Lista
         </p>
       </div>
 
@@ -163,27 +163,52 @@ export default function ImpostazioniPage() {
       </SettingsCard>
 
       <SettingsCard
-        title="Webhook di default"
-        description="Usato dalle ricerche che non impostano un webhook proprio"
+        title="Costi API"
+        description="Google non restituisce il costo reale per chiamata — questi tassi sono usati per stimare il costo mostrato per ricerca nei Logs e nel dettaglio Ricerca. Aggiornali se Google/OpenAI cambiano i prezzi."
       >
-        <Field label="URL webhook">
-          <input
-            type="text"
-            placeholder="https://crm.tuodominio.com/api/webhooks/lead-scraper"
-            className={`${inputClass} font-mono`}
-            value={defaultWebhookUrl}
-            onChange={(e) => setDefaultWebhookUrl(e.target.value)}
-          />
-        </Field>
-        <Field label={hasDefaultWebhookSecret ? "Shared secret (impostato — inserisci per sostituirlo)" : "Shared secret"}>
-          <input
-            type="password"
-            className={inputClass}
-            value={defaultWebhookSecret}
-            onChange={(e) => setDefaultWebhookSecret(e.target.value)}
-          />
-        </Field>
-        <SaveButton saved={savedFlags.webhook} onClick={saveWebhook} />
+        <div className="mb-2 grid grid-cols-2 gap-4">
+          <Field label="Nearby Search ($/chiamata)">
+            <input
+              type="number"
+              step="0.001"
+              className={inputClass}
+              value={costRates.googleNearbySearchCostPerCall}
+              onChange={(e) =>
+                setCostRates((c) => ({ ...c, googleNearbySearchCostPerCall: Number(e.target.value) }))
+              }
+            />
+          </Field>
+          <Field label="Place Details ($/chiamata)">
+            <input
+              type="number"
+              step="0.001"
+              className={inputClass}
+              value={costRates.googlePlaceDetailsCostPerCall}
+              onChange={(e) =>
+                setCostRates((c) => ({ ...c, googlePlaceDetailsCostPerCall: Number(e.target.value) }))
+              }
+            />
+          </Field>
+          <Field label="OpenAI input ($/1M token)">
+            <input
+              type="number"
+              step="0.01"
+              className={inputClass}
+              value={costRates.openAiInputCostPer1M}
+              onChange={(e) => setCostRates((c) => ({ ...c, openAiInputCostPer1M: Number(e.target.value) }))}
+            />
+          </Field>
+          <Field label="OpenAI output ($/1M token)">
+            <input
+              type="number"
+              step="0.01"
+              className={inputClass}
+              value={costRates.openAiOutputCostPer1M}
+              onChange={(e) => setCostRates((c) => ({ ...c, openAiOutputCostPer1M: Number(e.target.value) }))}
+            />
+          </Field>
+        </div>
+        <SaveButton saved={savedFlags.costs} onClick={saveCostRates} />
       </SettingsCard>
 
       <SettingsCard

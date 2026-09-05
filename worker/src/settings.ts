@@ -7,10 +7,12 @@ const db = new PrismaClient();
 const KEYS = {
   googleApiKey: "google_places_api_key",
   quotaCap: "google_places_quota_cap",
-  defaultWebhookUrl: "default_webhook_url",
-  defaultWebhookSecret: "default_webhook_secret",
   bucketThresholds: "bucket_thresholds",
   openAiApiKey: "openai_api_key",
+  googleNearbySearchCostPerCall: "google_nearby_search_cost_per_call",
+  googlePlaceDetailsCostPerCall: "google_place_details_cost_per_call",
+  openAiInputCostPer1M: "openai_input_cost_per_1m",
+  openAiOutputCostPer1M: "openai_output_cost_per_1m",
 } as const;
 
 async function read(key: string): Promise<string | null> {
@@ -30,11 +32,6 @@ export async function getQuotaCap(): Promise<number> {
   return v ? Number(v) : 500;
 }
 
-export async function getDefaultWebhook(): Promise<{ url: string | null; secret: string | null }> {
-  const [url, secret] = await Promise.all([read(KEYS.defaultWebhookUrl), read(KEYS.defaultWebhookSecret)]);
-  return { url, secret };
-}
-
 export async function getBucketThresholds(): Promise<{ b1: number; b2: number; b3: number }> {
   const v = await read(KEYS.bucketThresholds);
   return v ? JSON.parse(v) : { b1: 4, b2: 8, b3: 12 };
@@ -45,4 +42,32 @@ export async function getOpenAiApiKey(): Promise<string> {
   if (fromDb) return fromDb;
   if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
   throw new Error("OpenAI API key non configurata — impostala in Impostazioni");
+}
+
+// Google non restituisce il costo reale per chiamata — questi tassi sono impostazioni editabili
+// (Impostazioni → Costi API) così si possono aggiornare se Google cambia i prezzi, senza deploy.
+// Default: Nearby Search tier Pro ($32/1000); Place Details tier Enterprise+Atmosphere ($40/1000)
+// perché il fieldMask include "reviews", che secondo il pricing Google Maps Platform 2026 sposta
+// l'intera chiamata a quel tier (non basta chiedere un solo campo "premium" per pagare di più).
+export async function getGoogleCostRates(): Promise<{ nearbySearch: number; placeDetails: number }> {
+  const [nearbySearch, placeDetails] = await Promise.all([
+    read(KEYS.googleNearbySearchCostPerCall),
+    read(KEYS.googlePlaceDetailsCostPerCall),
+  ]);
+  return {
+    nearbySearch: nearbySearch ? Number(nearbySearch) : 0.032,
+    placeDetails: placeDetails ? Number(placeDetails) : 0.04,
+  };
+}
+
+// Prezzi gpt-4o-mini (2026): $0.15 / 1M token input, $0.60 / 1M token output.
+export async function getOpenAiCostRates(): Promise<{ inputPer1M: number; outputPer1M: number }> {
+  const [inputPer1M, outputPer1M] = await Promise.all([
+    read(KEYS.openAiInputCostPer1M),
+    read(KEYS.openAiOutputCostPer1M),
+  ]);
+  return {
+    inputPer1M: inputPer1M ? Number(inputPer1M) : 0.15,
+    outputPer1M: outputPer1M ? Number(outputPer1M) : 0.6,
+  };
 }

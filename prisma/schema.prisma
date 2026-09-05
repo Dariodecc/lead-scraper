@@ -83,6 +83,7 @@ enum LogCategory {
   search_run
   webhook_delivery
   google_api
+  ai_analysis
   system
 }
 
@@ -105,6 +106,15 @@ model List {
   // Analisi AI del sito (OpenAI) per ogni nuovo risultato — quando attiva, crea/aggiorna i due
   // campi custom ben noti "Analisi" (analisi_ai) e "Punteggio contattabilità" (punteggio_ai).
   aiAnalysisEnabled Boolean @default(false) @map("ai_analysis_enabled")
+  // Prompt Markdown custom per l'analisi AI di questa lista — se impostato SOSTITUISCE
+  // integralmente le istruzioni di valutazione di default (non si somma). Il blocco dati
+  // dell'attività (nome, sito, rating, testo pagina) viene comunque allegato sotto in automatico.
+  aiPromptMd String? @map("ai_prompt_md")
+
+  // Webhook in uscita — SOLO a livello di Lista (non Impostazioni, non per-ricerca).
+  outboundWebhookUrl             String? @map("outbound_webhook_url")
+  outboundWebhookSecretEncrypted String? @map("outbound_webhook_secret_encrypted")
+  outboundFields                 Json?   @map("outbound_fields") // null = tutti i campi valorizzati
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -215,10 +225,6 @@ model Search {
   listId String? @map("list_id") @db.Uuid
   list   List?   @relation(fields: [listId], references: [id], onDelete: SetNull)
 
-  outboundWebhookUrl          String? @map("outbound_webhook_url")
-  outboundWebhookSecretEncrypted String? @map("outbound_webhook_secret_encrypted")
-  outboundFields              Json?   @map("outbound_fields") // null = tutti i campi valorizzati
-
   status    SearchStatus @default(draft)
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
@@ -256,6 +262,8 @@ model Log {
   category LogCategory
   message  String
   payload  Json?
+  // Costo stimato/reale in USD di questa chiamata — valorizzato solo per google_api/ai_analysis.
+  costUsd  Decimal? @db.Decimal(10, 6) @map("cost_usd")
 
   searchId String? @map("search_id") @db.Uuid
   search   Search? @relation(fields: [searchId], references: [id], onDelete: SetNull)
