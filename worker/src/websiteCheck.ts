@@ -42,23 +42,55 @@ export interface WebsiteCheckResult {
   // Testo visibile della pagina, troncato — riusato per l'analisi AI (evita di ricaricare il
   // sito una seconda volta). Assente se il caricamento è fallito.
   pageText: string | null;
+  // Segnali tecnici REALI (non testo, non un'inferenza del modello) — passati all'analisi AI così
+  // "raggiungibilità"/HTTPS/redirect a dominio parcheggiato sono dati osservati, non indovinati
+  // da un modello che non può davvero "visitare" nulla (vede solo il testo estratto sotto).
+  httpStatus: number | null; // null = richiesta fallita del tutto (DNS, timeout, connessione rifiutata)
+  isHttps: boolean | null;
+  finalUrl: string | null; // dopo eventuali redirect
+  redirectedToDifferentDomain: boolean | null; // es. dominio scaduto parcheggiato altrove
 }
 
 const MAX_PAGE_TEXT_CHARS = 4000;
 
+function sameDomain(a: string, b: string): boolean {
+  try {
+    const norm = (h: string) => h.replace(/^www\./, "");
+    return norm(new URL(a).hostname) === norm(new URL(b).hostname);
+  } catch {
+    return true; // URL non parsabile: non azzardare un falso "redirect sospetto"
+  }
+}
+
 export async function checkWebsiteStatus(url: string): Promise<WebsiteCheckResult> {
+  const failed: WebsiteCheckResult = {
+    status: "outdated",
+    pageText: null,
+    httpStatus: null,
+    isHttps: null,
+    finalUrl: null,
+    redirectedToDifferentDomain: null,
+  };
+
   let browser: Browser;
   try {
     browser = await getBrowser();
   } catch (err) {
     console.error("checkWebsiteStatus: impossibile avviare il browser:", err);
-    return { status: "outdated", pageText: null };
+    return failed;
   }
 
   const page = await browser.newPage();
   try {
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
-    if (!response || !response.ok()) return { status: "outdated", pageText: null };
+    const finalUrl = page.url();
+    const httpStatus = response?.status() ?? null;
+    const isHttps = finalUrl.startsWith("https://");
+    const redirectedToDifferentDomain = !sameDomain(url, finalUrl);
+
+    if (!response || !response.ok()) {
+      return { ...failed, httpStatus, isHttps, finalUrl, redirectedToDifferentDomain };
+    }
 
     const hasViewportMeta = await page.locator('meta[name="viewport"]').count();
     const pageText = await page
@@ -66,10 +98,17 @@ export async function checkWebsiteStatus(url: string): Promise<WebsiteCheckResul
       .then((t) => t.replace(/\s+/g, " ").trim().slice(0, MAX_PAGE_TEXT_CHARS))
       .catch(() => null);
 
-    return { status: hasViewportMeta > 0 ? "ok" : "outdated", pageText };
+    return {
+      status: hasViewportMeta > 0 ? "ok" : "outdated",
+      pageText,
+      httpStatus,
+      isHttps,
+      finalUrl,
+      redirectedToDifferentDomain,
+    };
   } catch (err) {
     console.error(`checkWebsiteStatus: errore caricando ${url}:`, err);
-    return { status: "outdated", pageText: null };
+    return failed;
   } finally {
     await page.close();
   }

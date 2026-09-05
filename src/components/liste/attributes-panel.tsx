@@ -28,9 +28,11 @@ const AI_PROMPT_PLACEHOLDER = `Sei un analista che valuta se contattare questa a
 Valuta in particolare: [scrivi qui i tuoi criteri specifici, es. settore, zona, dimensione].
 
 Rispondi SOLO con un oggetto JSON valido con questi campi:
-- "website_status": uno tra "none", "outdated", "ok"
-- "analysis": una brevissima analisi in italiano (massimo 2 frasi)
-- "score": punteggio contattabilità da 0 a 10`;
+- "punteggio": intero 0-100
+- "fascia": uno tra "alto", "medio", "basso", "escluso"
+- "escludi_da_pipeline": true/false
+- "motivo_esclusione": stringa o null
+- "descrizione": 2-4 frasi in italiano`;
 
 function DeliveryFilterSection({
   listId,
@@ -180,9 +182,12 @@ function DeliveryFilterSection({
 
       <label className="mb-3 flex items-center gap-2 text-[13px]">
         <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} />
-        Analisi AI del sito (OpenAI) — crea &ldquo;Analisi&rdquo; e &ldquo;Punteggio
-        contattabilità&rdquo; per ogni nuovo risultato (richiede la chiave in Impostazioni). Se
-        l&apos;analisi fallisce, il risultato NON viene inviato al webhook.
+        Analisi AI del lead (OpenAI) — crea 5 campi per ogni risultato: Analisi, Punteggio
+        (0-100), Fascia, Escludi da pipeline, Motivo esclusione (richiede la chiave in
+        Impostazioni). Se l&apos;AI segnala &ldquo;Escludi da pipeline&rdquo; (es. catena,
+        multinazionale, sito già ottimo, attività chiusa) il risultato viene escluso dall&apos;invio
+        come per le catene rilevate a testo. Se l&apos;analisi fallisce del tutto, il risultato NON
+        viene inviato al webhook.
       </label>
       {aiEnabled && (
         <div className="mb-5 rounded-md border border-border bg-background p-3.5">
@@ -191,12 +196,13 @@ function DeliveryFilterSection({
           </label>
           <div className="mb-2 text-[11px] text-muted-soft">
             Se compilato, <strong>sostituisce integralmente</strong> le istruzioni di default —
-            devi includere tu la richiesta di rispondere in JSON con i campi{" "}
-            <code>website_status</code> (none/outdated/ok), <code>analysis</code> (testo) e{" "}
-            <code>score</code> (0-10): se li ometti l&apos;analisi fallirà, con l&apos;errore
-            visibile nei Logs. I dati dell&apos;attività (nome, sito, rating, testo estratto dalla
-            pagina) vengono allegati automaticamente sotto al tuo prompt. Lascia vuoto per usare le
-            istruzioni di default.
+            devi includere tu la richiesta di rispondere in JSON con almeno i campi{" "}
+            <code>punteggio</code> (0-100), <code>fascia</code>{" "}
+            (alto/medio/basso/escluso), <code>escludi_da_pipeline</code> (booleano) e{" "}
+            <code>descrizione</code>: se ne ometti anche solo uno l&apos;analisi fallirà, con
+            l&apos;errore visibile nei Logs. I dati dell&apos;attività (nome, sito, rating, segnali
+            tecnici reali del sito, testo estratto dalla pagina) vengono allegati automaticamente
+            sotto al tuo prompt. Lascia vuoto per usare le istruzioni di default.
           </div>
           <textarea
             rows={10}

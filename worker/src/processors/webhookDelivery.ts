@@ -4,7 +4,7 @@ import { decryptSecret } from "../lib/crypto";
 import { buildAttributes } from "../webhookPayload";
 import { makeLogger } from "../log";
 import { checkWebsiteStatus } from "../websiteCheck";
-import { runAiAnalysisForPlace } from "../aiAnalysis";
+import { runAiAnalysisForPlace, AI_ANALYSIS_ATTR_KEY, AI_SCORE_ATTR_KEY } from "../aiAnalysis";
 
 const db = new PrismaClient();
 const log = makeLogger(db);
@@ -26,22 +26,27 @@ export async function processWebhookDelivery(job: Job<WebhookDeliveryJobData>) {
   if (list.aiAnalysisEnabled) {
     const [analysisValue, scoreValue] = await Promise.all([
       db.placeCustomValue.findFirst({
-        where: { placeId: place.id, listAttribute: { listId: list.id, key: "analisi_ai" } },
+        where: { placeId: place.id, listAttribute: { listId: list.id, key: AI_ANALYSIS_ATTR_KEY } },
       }),
       db.placeCustomValue.findFirst({
-        where: { placeId: place.id, listAttribute: { listId: list.id, key: "punteggio_ai" } },
+        where: { placeId: place.id, listAttribute: { listId: list.id, key: AI_SCORE_ATTR_KEY } },
       }),
     ]);
     if (!analysisValue || !scoreValue) {
-      const websiteCheck = place.websiteUrl
-        ? await checkWebsiteStatus(place.websiteUrl)
-        : { status: "outdated" as const, pageText: null };
-      const aiOk = await runAiAnalysisForPlace(db, place, list, {
-        heuristicWebsiteStatus: place.websiteUrl ? websiteCheck.status : "none",
-        pageText: websiteCheck.pageText,
-      });
-      if (!aiOk) {
+      const websiteCheck = place.websiteUrl ? await checkWebsiteStatus(place.websiteUrl) : null;
+      const aiResult = await runAiAnalysisForPlace(db, place, list, { websiteCheck });
+      if (!aiResult.success) {
         await db.place.update({ where: { id: place.id }, data: { deliveryStatus: "failed" } });
+        return;
+      }
+      if (aiResult.excludeFromPipeline) {
+        await db.place.update({ where: { id: place.id }, data: { deliveryStatus: "excluded" } });
+        await log(
+          "info",
+          "webhook_delivery",
+          `Escluso dall'invio (esclusa dall'analisi AI${aiResult.excludeReason ? `: ${aiResult.excludeReason}` : ""})`,
+          { placeId: place.id },
+        );
         return;
       }
     }

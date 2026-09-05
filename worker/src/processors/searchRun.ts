@@ -226,10 +226,8 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
         costUsd: placeDetailsCost,
       });
 
-      const websiteCheck = details.websiteUrl
-        ? await checkWebsiteStatus(details.websiteUrl)
-        : { status: "outdated" as const, pageText: null };
-      const websiteStatus = details.websiteUrl ? websiteCheck.status : "none";
+      const websiteCheck = details.websiteUrl ? await checkWebsiteStatus(details.websiteUrl) : null;
+      const websiteStatus = details.websiteUrl ? (websiteCheck?.status ?? "outdated") : "none";
       const firstSeenAt = new Date();
       const { bucket, confidence } = estimateOpening({
         firstSeenAt,
@@ -278,24 +276,29 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
       // Gate analisi→consegna: se l'AI è attiva per questa lista, la consegna al webhook parte
       // SOLO se l'analisi ha successo — se fallisce (es. OpenAI senza credito) il place resta
       // "failed" e va rilanciato manualmente da Logs ("Riprova adesso"), niente retry automatico.
+      let aiExclude = false;
+      let aiExcludeReason: string | undefined;
       if (list.aiAnalysisEnabled) {
-        const aiOk = await runAiAnalysisForPlace(db, place, list, {
-          heuristicWebsiteStatus: websiteStatus,
-          pageText: websiteCheck.pageText,
+        const aiResult = await runAiAnalysisForPlace(db, place, list, {
+          websiteCheck,
           searchId: search.id,
         });
-        if (!aiOk) {
+        if (!aiResult.success) {
           await db.place.update({ where: { id: place.id }, data: { deliveryStatus: "failed" } });
           if (isTest && newCount >= 1) break;
           continue;
         }
+        aiExclude = aiResult.excludeFromPipeline;
+        aiExcludeReason = aiResult.excludeReason;
       }
 
       const rulesCheck = evaluateDeliveryRules(place, deliveryRules);
-      if (isChain || !rulesCheck.allowed) {
+      if (isChain || aiExclude || !rulesCheck.allowed) {
         const reason = isChain
           ? `probabile catena (nome ripetuto ${list.excludeChainsThreshold}+ volte nella lista)`
-          : `regola di invio: ${rulesCheck.reason}`;
+          : aiExclude
+            ? `esclusa dall'analisi AI${aiExcludeReason ? `: ${aiExcludeReason}` : ""}`
+            : `regola di invio: ${rulesCheck.reason}`;
         await db.place.update({ where: { id: place.id }, data: { deliveryStatus: "excluded" } });
         await log("info", "webhook_delivery", `Escluso dall'invio (${reason})`, {
           searchId: search.id,

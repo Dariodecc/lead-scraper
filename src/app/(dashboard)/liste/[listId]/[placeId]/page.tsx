@@ -36,6 +36,7 @@ interface ListAttribute {
   name: string;
   key: string;
   type: string;
+  options: string[] | null;
 }
 
 interface LogRow {
@@ -108,6 +109,26 @@ function CustomValueInput({
       >
         <option value="true">Sì</option>
         <option value="false">No</option>
+      </select>
+    );
+  }
+
+  if (attribute.type === "select" && attribute.options && attribute.options.length > 0) {
+    return (
+      <select
+        className={selectClass}
+        value={draft}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          onSave(e.target.value);
+        }}
+      >
+        <option value="">—</option>
+        {attribute.options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
       </select>
     );
   }

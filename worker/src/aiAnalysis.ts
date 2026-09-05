@@ -1,25 +1,34 @@
 import type { List, Place, PrismaClient } from "@prisma/client";
 import { getOpenAiApiKey, getOpenAiCostRates } from "./settings";
 import { makeLogger } from "./log";
+import type { WebsiteCheckResult } from "./websiteCheck";
 
 // Analisi AI del sito (opt-in per Lista, §7.2 Attributi) — non giudica solo il sito, ma la
-// potenzialità del lead nel suo complesso (attività + sito + segnali raccolti). Scrive tre cose:
-// una breve descrizione, uno scoring 0-10 di contattabilità, e la sua stessa valutazione dello
-// stato del sito — quest'ultima sostituisce l'euristica Playwright (solo meta viewport) quando
-// l'AI è attiva, perché ha il testo vero della pagina ed è meno soggetta a falsi positivi sui
-// siti con protezioni anti-bot (es. grandi catene bloccano Chromium headless, l'euristica vede
-// una pagina di blocco e segna "datato" a torto).
-export const AI_ANALYSIS_ATTR_KEY = "analisi_ai";
-export const AI_SCORE_ATTR_KEY = "punteggio_ai";
+// potenzialità del lead nel suo complesso (attività + sito + segnali raccolti). Schema di output
+// e rubrica di scoring allineati al prompt validato con Dario il 2026-09-05: 0-100 su tre
+// componenti pesate (opportunità sito / idoneità dimensionale / vitalità), con un'esclusione hard
+// dalla pipeline che ha priorità sul punteggio (catene/multinazionali, sito già ottimo, attività
+// chiusa) — l'esclusione alimenta lo stesso meccanismo già usato per le catene rilevate a testo.
+export const AI_ANALYSIS_ATTR_KEY = "analisi_ai"; // descrizione (testo)
+export const AI_SCORE_ATTR_KEY = "punteggio_ai"; // 0-100 (era 0-10 prima di questa revisione)
+export const AI_FASCIA_ATTR_KEY = "fascia_ai"; // alto | medio | basso | escluso
+export const AI_EXCLUDE_ATTR_KEY = "escludi_pipeline_ai"; // boolean
+export const AI_EXCLUDE_REASON_ATTR_KEY = "motivo_esclusione_ai"; // testo, vuoto se non escluso
 
 const MODEL = "gpt-4o-mini";
-const VALID_WEBSITE_STATUS = ["none", "outdated", "ok"] as const;
-type WebsiteStatusValue = (typeof VALID_WEBSITE_STATUS)[number];
+const VALID_FASCIA = ["alto", "medio", "basso", "escluso"] as const;
+type Fascia = (typeof VALID_FASCIA)[number];
+const VALID_STATO_SITO = ["assente", "datato", "base", "performante"] as const;
+type StatoSito = (typeof VALID_STATO_SITO)[number];
 
 interface AiAnalysisResult {
-  analysis: string;
-  score: number;
-  websiteStatus: WebsiteStatusValue | null;
+  punteggio: number;
+  fascia: Fascia;
+  escludiDaPipeline: boolean;
+  motivoEsclusione: string | null;
+  descrizione: string;
+  statoSito: StatoSito | null;
+  diagnostica: unknown; // analisi_sito/segnali_dimensione/segnali_vitalita/componenti/motivazione — solo per i Logs, non colonne di lista
 }
 
 interface OpenAiChatResponse {
@@ -27,26 +36,48 @@ interface OpenAiChatResponse {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
-const DEFAULT_INSTRUCTIONS = `Sei un analista che aiuta un'agenzia di siti web/marketing a decidere quali attività locali contattare come potenziali clienti. Il tuo giudizio non riguarda solo il sito: valuta la potenzialità complessiva del lead, combinando sito, reputazione e segnali di quanto l'attività sia giovane/attiva.
+// Rubrica adattata (genericizzata) dal prompt "Analisi e Scoring Lead" v1.0 del 2026-09-05.
+// L'esempio completo con output atteso è stato tolto dal default per non pagare quei token extra
+// a ogni chiamata — un prompt custom per lista (che sostituisce questo) può comunque includerlo.
+const DEFAULT_INSTRUCTIONS = `Sei un analista che valuta contatti commerciali per conto di un consulente/sviluppatore freelance che vende siti web e presenza digitale a piccole attività locali. Il tuo compito NON è giudicare se l'attività è "buona" o "cattiva" in generale — è stimare quanto ha senso proporle un sito web nuovo (o rifatto), e quindi quanto vale la pena farla entrare nella pipeline commerciale invece di scartarla subito. Il punteggio è un filtro per non perdere tempo su contatti che non convertiranno mai (sito già ottimo, o multinazionale che non decide su chiamata di un freelance).
 
-Rispondi SOLO con un oggetto JSON valido con questi campi:
-- "website_status": la TUA valutazione dello stato del sito, uno tra "none" (nessun sito), "outdated" (sito vecchio/trascurato/non responsive), "ok" (sito curato e aggiornato) — se non hai testo sufficiente per giudicare, usa il tuo giudizio migliore ma resta cauto nell'analisi
-- "analysis": una brevissima analisi in italiano (massimo 2 frasi) su quanto il sito sembra curato E quanto l'attività nel suo complesso sembra un buon lead da contattare
-- "score": punteggio "contattabilità" da 0 a 10 (10 = priorità massima, es. sito assente/datato ma attività con buona reputazione o appena aperta; 0 = non contattare, es. sito già ottimo o attività poco attiva/chiusa)
+TARGET PERFETTO (punteggio alto): micro imprese e PMI locali (negozi, artigiani, studi professionali, ristoranti, attività di servizio con una o poche sedi, decisione rapida di chi risponde al telefono); nessun sito o sito datato/rotto/abbandonato (template vecchi, non responsive, ultimo aggiornamento visibile di anni fa, oppure l'unica presenza è una scheda Google Business o una pagina social senza sito vero); attività viva e attiva (aperta, con un minimo di trazione reale — recensioni presenti anche poche, operativa da tempo o appena aperta).
 
-Formato: {"website_status": "...", "analysis": "...", "score": 0}`;
+DA ESCLUDERE (punteggio basso/nullo, priorità sul resto):
+- Catene, franchising in rete nazionale/internazionale, multinazionali: chi risponde al telefono di un punto vendita di un grande brand non decide nulla su un sito web. Riconoscile da: nome di brand noto, sito con selettore paese/lingua o "trova il punto vendita", decine/centinaia di sedi con lo stesso nome, categoria tipicamente a catena (fast food, banche, assicurazioni con agenzie, grande distribuzione, telco, noleggio auto internazionale) salvo indizi contrari (franchising indipendente a gestione locale autonoma — valuta caso per caso).
+- Sito già performante (moderno, responsive, veloce, aggiornato, con funzionalità utili al settore): bassissima probabilità che accettino di rifare tutto.
+- Attività non operativa (chiusa temporaneamente o definitivamente): non ha senso investire tempo commerciale.
 
-async function analyzeWebsite(params: {
+DATI CHE RICEVI: dati Google Places dell'attività (nome, indirizzo, categoria, rating, numero recensioni, fascia prezzo, stato attività, stima apertura con relativa confidenza) — tutti possono mancare, un dato mancante è un segnale debole, non un errore. rating/review_count/price_level sono proxy di traffico/vitalità, non misure di dimensione aziendale. Non interpretare mai la stima di apertura senza guardare anche la sua confidenza insieme.
+
+ANALISI DEL SITO: ricevi anche segnali TECNICI REALI già rilevati (raggiungibilità/codice HTTP, HTTPS sì/no, redirect verso un dominio diverso da quello atteso) — usali come fatti osservati, non indovinare questi aspetti. Ricevi inoltre il testo estratto dalla pagina (se raggiungibile): valutaci design/cura percepita, coerenza dei contenuti, presenza di funzionalità utili al settore, segnali di abbandono (date vecchie, contenuti incoerenti). Classifica lo stato del sito in una di quattro fasce: "assente" (nessun sito reale, o solo social/aggregatore/scheda Google), "datato" (esiste ma abbandonato/rotto/non curato), "base" (esiste e funziona ma è generico o superato, opportunità reale di miglioramento), "performante" (curato e moderno — il caso da escludere/penalizzare).
+
+PUNTEGGIO 0-100 = somma di tre componenti, poi eventualmente azzerato dalle esclusioni hard sotto:
+A. Opportunità sito — fino a 50 punti: assente/equivalente 45-50, datato/abbandonato 35-44, base ma funzionante 15-34, performante 0-10.
+B. Idoneità dimensionale — fino a 30 punti: micro impresa/gestione singola 25-30, PMI locale poche sedi 15-24, realtà più strutturata ma locale/indipendente 5-14, catena/multinazionale 0 (ed escludi_da_pipeline true).
+C. Vitalità commerciale — fino a 20 punti: operativa con recensioni/rating che indicano traffico reale o apertura recente 15-20, operativa con pochi segnali/dati scarsi 8-14, operativa con segnali deboli di calo 3-7, chiusa 0 (ed escludi_da_pipeline true).
+
+Fasce sul totale: 70-100 alto, 40-69 medio, 1-39 basso, 0 con escludi_da_pipeline true → escluso.
+
+REGOLE DI ESCLUSIONE HARD (sovrascrivono tutto): imposta escludi_da_pipeline=true e punteggio ≤10 se rilevi anche solo una di: attività chiaramente catena/franchising in rete/multinazionale; sito classificato "performante"; attività chiusa temporaneamente o definitivamente. Motiva sempre quale regola ha scattato in motivo_esclusione.
+
+Se un dato manca, non inventarlo: tratta l'assenza come segnale (es. sito assente) e scrivilo nelle note. Se il sito non è raggiungibile (codice HTTP assente/errore), trattalo come sito abbandonato o assente secondo la gravità, e scrivilo nelle note — è una stima da un fallimento di accesso, non un'analisi completa del contenuto.
+
+Rispondi SOLO con un oggetto JSON valido, nessun testo prima o dopo, con questa struttura esatta:
+{"punteggio": 0, "fascia": "alto|medio|basso|escluso", "escludi_da_pipeline": false, "motivo_esclusione": null, "descrizione": "2-4 frasi in italiano su chi è l'attività, che presenza digitale ha, perché è o non è un buon lead", "analisi_sito": {"stato_sito": "assente|datato|base|performante", "note": "..."}, "segnali_dimensione": {"tipo_attivita": "micro_impresa|pmi|struttura_locale_piu_grande|catena_franchising|multinazionale|sconosciuto", "note": "..."}, "segnali_vitalita": {"stato": "attiva_consolidata|attiva_nuova_apertura|attiva_dati_scarsi|segnali_di_calo|non_operativa", "note": "..."}, "punteggio_componenti": {"opportunita_sito": 0, "idoneita_dimensionale": 0, "vitalita": 0}, "motivazione_punteggio": ["punto 1 breve", "punto 2 breve"]}`;
+
+async function callOpenAi(params: {
   businessName: string;
   category: string | null;
+  address: string;
   websiteUrl: string | null;
-  heuristicWebsiteStatus: string;
   rating: number | null;
   reviewCount: number | null;
   priceLevel: number | null;
+  businessStatus: string | null;
   estimatedOpeningWindow: string;
   estimationConfidence: string;
-  pageText: string | null;
+  websiteCheck: WebsiteCheckResult | null;
   customPromptMd: string | null;
 }): Promise<{ ok: true; result: AiAnalysisResult; costUsd: number } | { ok: false; error: string }> {
   let apiKey: string;
@@ -56,19 +87,28 @@ async function analyzeWebsite(params: {
     return { ok: false, error: String(err) };
   }
 
-  // Il blocco dati è sempre allegato in automatico: è dato runtime (nome, sito, rating, testo
-  // pagina), non un'istruzione — un prompt statico scritto in anticipo non può contenerlo. Il
-  // prompt custom per lista, quando impostato, SOSTITUISCE integralmente le istruzioni sopra
-  // (compreso il vincolo di formato JSON) — l'utente deve richiederlo lui stesso nel suo prompt.
+  const wc = params.websiteCheck;
+  const technicalSignals = params.websiteUrl
+    ? wc
+      ? `Segnali tecnici reali rilevati: codice risposta HTTP ${wc.httpStatus ?? "nessuna risposta (sito irraggiungibile)"}; HTTPS: ${wc.isHttps == null ? "n/d" : wc.isHttps ? "sì" : "no"}; ${wc.redirectedToDifferentDomain ? `redirect verso un dominio diverso (${wc.finalUrl}) — possibile dominio scaduto/parcheggiato` : "nessun redirect verso un altro dominio"}.`
+      : "Nessun controllo tecnico disponibile per questo sito."
+    : "Nessun sito web presente.";
+
+  // Il blocco dati è sempre allegato in automatico: è dato runtime (nome, sito, segnali tecnici
+  // reali, testo pagina), non un'istruzione — un prompt statico scritto in anticipo non può
+  // contenerlo. Il prompt custom per lista, quando impostato, SOSTITUISCE integralmente le
+  // istruzioni sopra (compreso il vincolo di formato JSON) — l'utente deve richiederlo lui stesso.
   const instructions = params.customPromptMd?.trim() || DEFAULT_INSTRUCTIONS;
   const dataBlock = `Attività: ${params.businessName}
 Categoria: ${params.category ?? "n/d"}
+Indirizzo: ${params.address}
 Sito web: ${params.websiteUrl ?? "assente"}
-Stato sito rilevato da un controllo automatico (solo presenza tag viewport, può sbagliare — es. su siti con protezioni anti-bot): ${params.heuristicWebsiteStatus}
+${technicalSignals}
 Rating: ${params.rating ?? "n/d"} (${params.reviewCount ?? 0} recensioni)
 Fascia di prezzo rilevata: ${params.priceLevel ?? "n/d"}
+Stato attività: ${params.businessStatus ?? "n/d"}
 Apertura stimata dell'attività: ${params.estimatedOpeningWindow} (confidenza: ${params.estimationConfidence})
-${params.pageText ? `Testo estratto dal sito (troncato):\n"""${params.pageText}"""` : "Nessun testo disponibile dal sito (assente, non caricato, o bloccato da una protezione anti-bot — non dedurre che il sito sia per forza vecchio solo per questo, dillo esplicitamente nell'analisi se è il caso)."}`;
+${wc?.pageText ? `Testo estratto dal sito (troncato):\n"""${wc.pageText}"""` : "Nessun testo disponibile dal sito."}`;
   const prompt = `${instructions}\n\n${dataBlock}`;
 
   try {
@@ -83,7 +123,7 @@ ${params.pageText ? `Testo estratto dal sito (troncato):\n"""${params.pageText}"
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" },
         temperature: 0.3,
-        max_tokens: 250,
+        max_tokens: 600,
       }),
       signal: AbortSignal.timeout(30_000),
     });
@@ -100,29 +140,48 @@ ${params.pageText ? `Testo estratto dal sito (troncato):\n"""${params.pageText}"
     if (!content) return { ok: false, error: "Risposta OpenAI senza contenuto" };
 
     const parsed = JSON.parse(content) as {
-      analysis?: string;
-      score?: number;
-      website_status?: string;
+      punteggio?: number;
+      fascia?: string;
+      escludi_da_pipeline?: boolean;
+      motivo_esclusione?: string | null;
+      descrizione?: string;
+      analisi_sito?: { stato_sito?: string };
+      [key: string]: unknown;
     };
-    if (typeof parsed.analysis !== "string" || typeof parsed.score !== "number") {
+
+    if (
+      typeof parsed.punteggio !== "number" ||
+      typeof parsed.descrizione !== "string" ||
+      typeof parsed.escludi_da_pipeline !== "boolean" ||
+      !VALID_FASCIA.includes(parsed.fascia as Fascia)
+    ) {
       return {
         ok: false,
         error:
-          "Risposta AI non nel formato atteso (mancano analysis/score) — verifica il prompt personalizzato della lista",
+          "Risposta AI non nel formato atteso (mancano punteggio/fascia/escludi_da_pipeline/descrizione) — verifica il prompt personalizzato della lista",
       };
     }
 
-    const websiteStatus = VALID_WEBSITE_STATUS.includes(parsed.website_status as WebsiteStatusValue)
-      ? (parsed.website_status as WebsiteStatusValue)
-      : null;
+    const statoSitoRaw = parsed.analisi_sito?.stato_sito;
+    const statoSito = VALID_STATO_SITO.includes(statoSitoRaw as StatoSito) ? (statoSitoRaw as StatoSito) : null;
 
     return {
       ok: true,
       costUsd,
       result: {
-        analysis: parsed.analysis.slice(0, 500),
-        score: Math.max(0, Math.min(10, Math.round(parsed.score))),
-        websiteStatus,
+        punteggio: Math.max(0, Math.min(100, Math.round(parsed.punteggio))),
+        fascia: parsed.fascia as Fascia,
+        escludiDaPipeline: parsed.escludi_da_pipeline,
+        motivoEsclusione: typeof parsed.motivo_esclusione === "string" ? parsed.motivo_esclusione : null,
+        descrizione: parsed.descrizione.slice(0, 800),
+        statoSito,
+        diagnostica: {
+          analisi_sito: parsed.analisi_sito,
+          segnali_dimensione: parsed.segnali_dimensione,
+          segnali_vitalita: parsed.segnali_vitalita,
+          punteggio_componenti: parsed.punteggio_componenti,
+          motivazione_punteggio: parsed.motivazione_punteggio,
+        },
       },
     };
   } catch (err) {
@@ -130,56 +189,72 @@ ${params.pageText ? `Testo estratto dal sito (troncato):\n"""${params.pageText}"
   }
 }
 
-/** Crea (se assenti) i due campi custom ben noti per l'analisi AI e ritorna i loro id. */
+// assente/datato→segnale negativo per il sito, base→ancora un'opportunità ma non "rotto",
+// performante→sito curato. Il nostro websiteStatus ha solo 3 stati: collassiamo "datato" e "base"
+// su "outdated" (entrambi restano opportunità di vendita nella logica del prompt).
+const STATO_SITO_TO_WEBSITE_STATUS: Record<StatoSito, "none" | "outdated" | "ok"> = {
+  assente: "none",
+  datato: "outdated",
+  base: "outdated",
+  performante: "ok",
+};
+
+/** Crea (se assenti) i campi custom noti per l'analisi AI e ritorna i loro id. */
 export async function ensureAiAttributes(
   db: PrismaClient,
   listId: string,
-): Promise<{ analysisAttrId: string; scoreAttrId: string }> {
-  const [analysisAttr, scoreAttr] = await Promise.all([
-    db.listAttribute.upsert({
-      where: { listId_key: { listId, key: AI_ANALYSIS_ATTR_KEY } },
-      create: { listId, key: AI_ANALYSIS_ATTR_KEY, name: "Analisi", type: "text", position: 100 },
-      update: {},
-    }),
-    db.listAttribute.upsert({
-      where: { listId_key: { listId, key: AI_SCORE_ATTR_KEY } },
-      create: {
-        listId,
-        key: AI_SCORE_ATTR_KEY,
-        name: "Punteggio contattabilità",
-        type: "number",
-        position: 101,
-      },
-      update: {},
-    }),
-  ]);
-  return { analysisAttrId: analysisAttr.id, scoreAttrId: scoreAttr.id };
+): Promise<Record<string, string>> {
+  const defs: { key: string; name: string; type: "text" | "number" | "boolean" | "select"; position: number; options?: unknown }[] = [
+    { key: AI_ANALYSIS_ATTR_KEY, name: "Analisi", type: "text", position: 100 },
+    { key: AI_SCORE_ATTR_KEY, name: "Punteggio contattabilità", type: "number", position: 101 },
+    {
+      key: AI_FASCIA_ATTR_KEY,
+      name: "Fascia",
+      type: "select",
+      position: 102,
+      options: ["alto", "medio", "basso", "escluso"],
+    },
+    { key: AI_EXCLUDE_ATTR_KEY, name: "Escludi da pipeline", type: "boolean", position: 103 },
+    { key: AI_EXCLUDE_REASON_ATTR_KEY, name: "Motivo esclusione", type: "text", position: 104 },
+  ];
+
+  const attrs = await Promise.all(
+    defs.map((d) =>
+      db.listAttribute.upsert({
+        where: { listId_key: { listId, key: d.key } },
+        create: { listId, key: d.key, name: d.name, type: d.type, position: d.position, options: d.options as never },
+        update: {},
+      }),
+    ),
+  );
+  return Object.fromEntries(attrs.map((a, i) => [defs[i].key, a.id]));
 }
 
 /**
  * Esegue l'analisi AI per un place e, se riesce, scrive i campi custom + l'eventuale override di
- * websiteStatus. Ritorna true/false — il chiamante decide cosa fare della consegna webhook in
- * base a questo esito (gate analisi→consegna, §7.2: "se l'analisi fallisce non devo procedere").
- * Logga sempre l'esito in categoria ai_analysis, cosa che prima mancava (solo console.error).
+ * websiteStatus. Ritorna l'esito — il chiamante decide cosa fare della consegna webhook in base a
+ * questo (gate analisi→consegna) E dell'eventuale richiesta di esclusione dalla pipeline dell'AI
+ * stessa (stesso meccanismo già usato per l'esclusione catene).
  */
 export async function runAiAnalysisForPlace(
   db: PrismaClient,
   place: Place,
   list: List,
-  params: { heuristicWebsiteStatus: string; pageText: string | null; searchId?: string | null },
-): Promise<boolean> {
+  params: { websiteCheck: WebsiteCheckResult | null; searchId?: string | null },
+): Promise<{ success: boolean; excludeFromPipeline: boolean; excludeReason?: string }> {
   const log = makeLogger(db);
-  const outcome = await analyzeWebsite({
+  const outcome = await callOpenAi({
     businessName: place.businessName,
     category: place.category,
+    address: place.address,
     websiteUrl: place.websiteUrl,
-    heuristicWebsiteStatus: params.heuristicWebsiteStatus,
     rating: place.rating != null ? Number(place.rating) : null,
     reviewCount: place.reviewCount,
     priceLevel: place.priceLevel,
+    businessStatus: place.businessStatus,
     estimatedOpeningWindow: place.estimatedOpeningWindow,
     estimationConfidence: place.estimationConfidence,
-    pageText: params.pageText,
+    websiteCheck: params.websiteCheck,
     customPromptMd: list.aiPromptMd,
   });
 
@@ -188,33 +263,54 @@ export async function runAiAnalysisForPlace(
       searchId: params.searchId,
       placeId: place.id,
     });
-    return false;
+    return { success: false, excludeFromPipeline: false };
   }
 
-  const aiAttrs = await ensureAiAttributes(db, list.id);
+  const attrs = await ensureAiAttributes(db, list.id);
   const { result } = outcome;
-  if (result.websiteStatus) place.websiteStatus = result.websiteStatus;
+  const websiteStatusOverride = result.statoSito ? STATO_SITO_TO_WEBSITE_STATUS[result.statoSito] : null;
+  if (websiteStatusOverride) place.websiteStatus = websiteStatusOverride;
 
   await db.$transaction([
     db.placeCustomValue.upsert({
-      where: { listAttributeId_placeId: { listAttributeId: aiAttrs.analysisAttrId, placeId: place.id } },
-      create: { listAttributeId: aiAttrs.analysisAttrId, placeId: place.id, value: result.analysis },
-      update: { value: result.analysis },
+      where: { listAttributeId_placeId: { listAttributeId: attrs[AI_ANALYSIS_ATTR_KEY], placeId: place.id } },
+      create: { listAttributeId: attrs[AI_ANALYSIS_ATTR_KEY], placeId: place.id, value: result.descrizione },
+      update: { value: result.descrizione },
     }),
     db.placeCustomValue.upsert({
-      where: { listAttributeId_placeId: { listAttributeId: aiAttrs.scoreAttrId, placeId: place.id } },
-      create: { listAttributeId: aiAttrs.scoreAttrId, placeId: place.id, value: result.score },
-      update: { value: result.score },
+      where: { listAttributeId_placeId: { listAttributeId: attrs[AI_SCORE_ATTR_KEY], placeId: place.id } },
+      create: { listAttributeId: attrs[AI_SCORE_ATTR_KEY], placeId: place.id, value: result.punteggio },
+      update: { value: result.punteggio },
     }),
-    ...(result.websiteStatus
-      ? [db.place.update({ where: { id: place.id }, data: { websiteStatus: result.websiteStatus } })]
+    db.placeCustomValue.upsert({
+      where: { listAttributeId_placeId: { listAttributeId: attrs[AI_FASCIA_ATTR_KEY], placeId: place.id } },
+      create: { listAttributeId: attrs[AI_FASCIA_ATTR_KEY], placeId: place.id, value: result.fascia },
+      update: { value: result.fascia },
+    }),
+    db.placeCustomValue.upsert({
+      where: { listAttributeId_placeId: { listAttributeId: attrs[AI_EXCLUDE_ATTR_KEY], placeId: place.id } },
+      create: { listAttributeId: attrs[AI_EXCLUDE_ATTR_KEY], placeId: place.id, value: result.escludiDaPipeline },
+      update: { value: result.escludiDaPipeline },
+    }),
+    db.placeCustomValue.upsert({
+      where: { listAttributeId_placeId: { listAttributeId: attrs[AI_EXCLUDE_REASON_ATTR_KEY], placeId: place.id } },
+      create: {
+        listAttributeId: attrs[AI_EXCLUDE_REASON_ATTR_KEY],
+        placeId: place.id,
+        value: result.motivoEsclusione ?? "",
+      },
+      update: { value: result.motivoEsclusione ?? "" },
+    }),
+    ...(websiteStatusOverride
+      ? [db.place.update({ where: { id: place.id }, data: { websiteStatus: websiteStatusOverride } })]
       : []),
   ]);
 
-  await log("info", "ai_analysis", `Analisi AI completata: punteggio ${result.score}/10`, {
-    searchId: params.searchId,
-    placeId: place.id,
-    costUsd: outcome.costUsd,
-  });
-  return true;
+  await log(
+    "info",
+    "ai_analysis",
+    `Analisi AI completata: punteggio ${result.punteggio}/100 (${result.fascia})${result.escludiDaPipeline ? " — esclusa dalla pipeline" : ""}`,
+    { searchId: params.searchId, placeId: place.id, costUsd: outcome.costUsd, payload: result.diagnostica },
+  );
+  return { success: true, excludeFromPipeline: result.escludiDaPipeline, excludeReason: result.motivoEsclusione ?? undefined };
 }
