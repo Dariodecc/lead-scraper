@@ -53,8 +53,6 @@ export default function ImpostazioniPage() {
   const [hasOpenAiApiKey, setHasOpenAiApiKey] = useState(false);
   const [openAiApiKey, setOpenAiApiKey] = useState("");
   const [costRates, setCostRates] = useState({
-    googleNearbySearchCostPerCall: 0.032,
-    googlePlaceDetailsCostPerCall: 0.04,
     openAiInputCostPer1M: 0.15,
     openAiOutputCostPer1M: 0.6,
   });
@@ -74,8 +72,6 @@ export default function ImpostazioniPage() {
         setBucketThresholds(data.bucketThresholds);
         setHasOpenAiApiKey(data.hasOpenAiApiKey);
         setCostRates({
-          googleNearbySearchCostPerCall: data.googleNearbySearchCostPerCall,
-          googlePlaceDetailsCostPerCall: data.googlePlaceDetailsCostPerCall,
           openAiInputCostPer1M: data.openAiInputCostPer1M,
           openAiOutputCostPer1M: data.openAiOutputCostPer1M,
         });
@@ -164,31 +160,9 @@ export default function ImpostazioniPage() {
 
       <SettingsCard
         title="Costi API"
-        description="Google non restituisce il costo reale per chiamata — questi tassi sono usati per stimare il costo mostrato per ricerca nei Logs e nel dettaglio Ricerca. Aggiornali se Google/OpenAI cambiano i prezzi."
+        description="Google Places: costo reale calcolato dal worker in base al tariffario ufficiale a scaglioni di Google Maps Platform e al volume di chiamate del mese in corso (non un tasso fisso — vedi worker/src/costs.ts). OpenAI: calcolato dai token realmente usati in ogni chiamata, moltiplicati per i tassi qui sotto — aggiornali se OpenAI cambia i prezzi di gpt-4o-mini."
       >
         <div className="mb-2 grid grid-cols-2 gap-4">
-          <Field label="Nearby Search ($/chiamata)">
-            <input
-              type="number"
-              step="0.001"
-              className={inputClass}
-              value={costRates.googleNearbySearchCostPerCall}
-              onChange={(e) =>
-                setCostRates((c) => ({ ...c, googleNearbySearchCostPerCall: Number(e.target.value) }))
-              }
-            />
-          </Field>
-          <Field label="Place Details ($/chiamata)">
-            <input
-              type="number"
-              step="0.001"
-              className={inputClass}
-              value={costRates.googlePlaceDetailsCostPerCall}
-              onChange={(e) =>
-                setCostRates((c) => ({ ...c, googlePlaceDetailsCostPerCall: Number(e.target.value) }))
-              }
-            />
-          </Field>
           <Field label="OpenAI input ($/1M token)">
             <input
               type="number"

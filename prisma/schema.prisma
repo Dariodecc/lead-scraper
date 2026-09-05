@@ -279,6 +279,21 @@ model Log {
   @@map("logs")
 }
 
+// Contatore cumulativo mensile per SKU Google — necessario per calcolare il costo REALE di ogni
+// chiamata secondo il tariffario a scaglioni di Google Maps Platform (il prezzo per chiamata
+// scende oltre certe soglie di volume mensile, es. Nearby Search Pro: $32/1000 fino a 100k,
+// $25.60/1000 da 100k a 500k, ecc. — vedi worker/src/costs.ts per le fasce complete e la fonte).
+model GoogleApiUsage {
+  id        String   @id @default(uuid()) @db.Uuid
+  month     String // bucket "YYYY-MM", stesso ciclo di fatturazione mensile di Google
+  sku       String // "nearby_search_pro" | "place_details_enterprise_atmosphere"
+  callCount Int      @default(0) @map("call_count")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([month, sku])
+  @@map("google_api_usage")
+}
+
 model IntegrationSetting {
   id             String   @id @default(uuid()) @db.Uuid
   key            String   @unique

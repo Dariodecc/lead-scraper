@@ -3,7 +3,8 @@ import { PrismaClient } from "@prisma/client";
 import { nearbySearchPlaceIds, getPlaceDetails, NEARBY_MAX_RESULTS } from "../googlePlaces";
 import { checkWebsiteStatus } from "../websiteCheck";
 import { estimateOpening } from "../lib/openingEstimate";
-import { getBucketThresholds, getQuotaCap, getGoogleCostRates } from "../settings";
+import { getBucketThresholds, getQuotaCap } from "../settings";
+import { recordGoogleApiCalls } from "../costs";
 import { enqueueWebhookDelivery } from "../queue";
 import { makeLogger } from "../log";
 import { generateGrid } from "../grid";
@@ -117,7 +118,6 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
   }
   const deliveryRules = list.deliveryRules as DeliveryRules | null;
   if (list.aiAnalysisEnabled) await ensureAiAttributes(db, list.id);
-  const googleCostRates = await getGoogleCostRates();
 
   const quotaCap = await getQuotaCap();
   const usedToday = await googleApiCallsUsedToday();
@@ -200,11 +200,12 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
     }
 
     const placeIds = [...placeIdSet];
+    const nearbySearchCost = await recordGoogleApiCalls(db, "nearby_search_pro", nearbyCallCounter.count);
     await log(
       "info",
       "google_api",
       `Nearby Search: ${placeIds.length} risultati unici (${nearbyCallCounter.count} chiamate)`,
-      { searchId: search.id, costUsd: nearbyCallCounter.count * googleCostRates.nearbySearch },
+      { searchId: search.id, costUsd: nearbySearchCost },
     );
 
     const thresholds = await getBucketThresholds();
@@ -219,9 +220,10 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
       }
 
       const details = await getPlaceDetails(placeId);
+      const placeDetailsCost = await recordGoogleApiCalls(db, "place_details_enterprise_atmosphere", 1);
       await log("info", "google_api", `Place Details: ${details.businessName}`, {
         searchId: search.id,
-        costUsd: googleCostRates.placeDetails,
+        costUsd: placeDetailsCost,
       });
 
       const websiteCheck = details.websiteUrl

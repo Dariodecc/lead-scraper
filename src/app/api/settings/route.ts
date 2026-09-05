@@ -7,8 +7,6 @@ const KEYS = {
   quotaCap: "google_places_quota_cap",
   bucketThresholds: "bucket_thresholds",
   openAiApiKey: "openai_api_key",
-  googleNearbySearchCostPerCall: "google_nearby_search_cost_per_call",
-  googlePlaceDetailsCostPerCall: "google_place_details_cost_per_call",
   openAiInputCostPer1M: "openai_input_cost_per_1m",
   openAiOutputCostPer1M: "openai_output_cost_per_1m",
 } as const;
@@ -19,17 +17,14 @@ async function getSetting(key: string) {
 }
 
 export async function GET() {
-  const [apiKey, quotaCap, thresholds, openAiKey, nearbyCost, detailsCost, inputCost, outputCost] =
-    await Promise.all([
-      getSetting(KEYS.googleApiKey),
-      getSetting(KEYS.quotaCap),
-      getSetting(KEYS.bucketThresholds),
-      getSetting(KEYS.openAiApiKey),
-      getSetting(KEYS.googleNearbySearchCostPerCall),
-      getSetting(KEYS.googlePlaceDetailsCostPerCall),
-      getSetting(KEYS.openAiInputCostPer1M),
-      getSetting(KEYS.openAiOutputCostPer1M),
-    ]);
+  const [apiKey, quotaCap, thresholds, openAiKey, inputCost, outputCost] = await Promise.all([
+    getSetting(KEYS.googleApiKey),
+    getSetting(KEYS.quotaCap),
+    getSetting(KEYS.bucketThresholds),
+    getSetting(KEYS.openAiApiKey),
+    getSetting(KEYS.openAiInputCostPer1M),
+    getSetting(KEYS.openAiOutputCostPer1M),
+  ]);
 
   return NextResponse.json({
     hasApiKey: isSecretSet(apiKey),
@@ -38,8 +33,6 @@ export async function GET() {
       ? JSON.parse(decryptSecret(thresholds))
       : { b1: 4, b2: 8, b3: 12 },
     hasOpenAiApiKey: isSecretSet(openAiKey),
-    googleNearbySearchCostPerCall: nearbyCost ? Number(decryptSecret(nearbyCost)) : 0.032,
-    googlePlaceDetailsCostPerCall: detailsCost ? Number(decryptSecret(detailsCost)) : 0.04,
     openAiInputCostPer1M: inputCost ? Number(decryptSecret(inputCost)) : 0.15,
     openAiOutputCostPer1M: outputCost ? Number(decryptSecret(outputCost)) : 0.6,
   });
@@ -67,12 +60,6 @@ export async function PATCH(req: Request) {
   }
   if (typeof body.openAiApiKey === "string" && body.openAiApiKey.length > 0) {
     writes.push(upsert(KEYS.openAiApiKey, body.openAiApiKey));
-  }
-  if (body.googleNearbySearchCostPerCall != null) {
-    writes.push(upsert(KEYS.googleNearbySearchCostPerCall, String(body.googleNearbySearchCostPerCall)));
-  }
-  if (body.googlePlaceDetailsCostPerCall != null) {
-    writes.push(upsert(KEYS.googlePlaceDetailsCostPerCall, String(body.googlePlaceDetailsCostPerCall)));
   }
   if (body.openAiInputCostPer1M != null) {
     writes.push(upsert(KEYS.openAiInputCostPer1M, String(body.openAiInputCostPer1M)));
