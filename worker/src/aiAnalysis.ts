@@ -15,6 +15,49 @@ export const AI_FASCIA_ATTR_KEY = "fascia_ai"; // alto | medio | basso | escluso
 export const AI_EXCLUDE_ATTR_KEY = "escludi_pipeline_ai"; // boolean
 export const AI_EXCLUDE_REASON_ATTR_KEY = "motivo_esclusione_ai"; // testo, vuoto se non escluso
 
+// gpt-4o-mini occasionalmente doppio-codifica caratteri accentati nelle stringhe JSON (scrive la
+// sequenza di byte UTF-8 di una lettera accentata come se ciascun byte fosse un codepoint Latin-1
+// a se stante) — piu' probabile su risposte JSON lunghe come questo schema. Si ripara
+// reinterpretando i byte come Latin-1 e ri-decodificandoli come UTF-8 (l'inverso esatto
+// dell'errore), solo quando il pattern e' presente e la riparazione non produce testo invalido.
+// Ã/Â = "Ã"/"Â" (primo byte tipico di una sequenza UTF-8 mal reinterpretata), seguito da
+// un carattere nel range -¿ (secondo byte tipico di quella stessa sequenza).
+const MOJIBAKE_PATTERN = /[\u00c3\u00c2][\u0080-\u00bf]/;
+
+function fixMojibakeOnce(text: string): string {
+  if (!MOJIBAKE_PATTERN.test(text)) return text;
+  try {
+    const repaired = Buffer.from(text, "latin1").toString("utf8");
+    return repaired.includes("�") ? text : repaired;
+  } catch {
+    return text;
+  }
+}
+
+// Alcune risposte risultano corrotte su piu' livelli (l'errore capita due volte in cascata) -
+// si ripete la riparazione finche' non cambia piu' nulla (max 4 passate, un numero arbitrario
+// ma ampiamente sufficiente: ogni passata risolve un livello di doppia codifica).
+function fixMojibake(text: string): string {
+  let current = text;
+  for (let i = 0; i < 4; i++) {
+    const next = fixMojibakeOnce(current);
+    if (next === current) break;
+    current = next;
+  }
+  return current;
+}
+
+function deepFixMojibake<T>(value: T): T {
+  if (typeof value === "string") return fixMojibake(value) as unknown as T;
+  if (Array.isArray(value)) return value.map((v) => deepFixMojibake(v)) as unknown as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, deepFixMojibake(v)]),
+    ) as T;
+  }
+  return value;
+}
+
 const MODEL = "gpt-4o-mini";
 const VALID_FASCIA = ["alto", "medio", "basso", "escluso"] as const;
 type Fascia = (typeof VALID_FASCIA)[number];
@@ -139,15 +182,17 @@ ${wc?.pageText ? `Testo estratto dal sito (troncato):\n"""${wc.pageText}"""` : "
     const content = data.choices?.[0]?.message?.content;
     if (!content) return { ok: false, error: "Risposta OpenAI senza contenuto" };
 
-    const parsed = JSON.parse(content) as {
-      punteggio?: number;
-      fascia?: string;
-      escludi_da_pipeline?: boolean;
-      motivo_esclusione?: string | null;
-      descrizione?: string;
-      analisi_sito?: { stato_sito?: string };
-      [key: string]: unknown;
-    };
+    const parsed = deepFixMojibake(
+      JSON.parse(content) as {
+        punteggio?: number;
+        fascia?: string;
+        escludi_da_pipeline?: boolean;
+        motivo_esclusione?: string | null;
+        descrizione?: string;
+        analisi_sito?: { stato_sito?: string };
+        [key: string]: unknown;
+      },
+    );
 
     if (
       typeof parsed.punteggio !== "number" ||
