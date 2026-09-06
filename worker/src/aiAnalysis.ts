@@ -230,7 +230,7 @@ ${wc?.pageText ? `Testo estratto dal sito (troncato):\n"""${wc.pageText}"""` : "
       typeof componenti.opportunita_sito === "number" &&
       typeof componenti.idoneita_dimensionale === "number" &&
       typeof componenti.vitalita === "number";
-    const punteggioCorretto = componentiValide
+    const punteggioSommato = componentiValide
       ? Math.max(
           0,
           Math.min(
@@ -239,6 +239,11 @@ ${wc?.pageText ? `Testo estratto dal sito (troncato):\n"""${wc.pageText}"""` : "
           ),
         )
       : Math.max(0, Math.min(100, Math.round(parsed.punteggio)));
+    // L'esclusione è una regola hard che sovrascrive tutto (§rubrica: "punteggio ≤10") — il
+    // modello a volte la applica solo al flag/fascia dimenticando di abbassare anche i componenti
+    // (osservato dal vivo: escludi_da_pipeline=true ma componenti sommati a 44). La forziamo qui,
+    // non ci si può fidare che il modello tenga i due allineati da solo.
+    const punteggioCorretto = parsed.escludi_da_pipeline ? Math.min(punteggioSommato, 10) : punteggioSommato;
     const fasciaCorretta: Fascia = parsed.escludi_da_pipeline
       ? "escluso"
       : punteggioCorretto >= 70
