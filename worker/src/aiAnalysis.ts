@@ -14,6 +14,7 @@ export const AI_SCORE_ATTR_KEY = "punteggio_ai"; // 0-100 (era 0-10 prima di que
 export const AI_FASCIA_ATTR_KEY = "fascia_ai"; // alto | medio | basso | escluso
 export const AI_EXCLUDE_ATTR_KEY = "escludi_pipeline_ai"; // boolean
 export const AI_EXCLUDE_REASON_ATTR_KEY = "motivo_esclusione_ai"; // testo, vuoto se non escluso
+export const AI_INCLUDE_REASON_ATTR_KEY = "motivo_pipeline_ai"; // testo, vuoto se escluso — perché merita di entrare in pipeline
 
 // gpt-4o-mini occasionalmente doppio-codifica caratteri accentati nelle stringhe JSON (scrive la
 // sequenza di byte UTF-8 di una lettera accentata come se ciascun byte fosse un codepoint Latin-1
@@ -69,6 +70,7 @@ interface AiAnalysisResult {
   fascia: Fascia;
   escludiDaPipeline: boolean;
   motivoEsclusione: string | null;
+  motivoPipeline: string | null;
   descrizione: string;
   statoSito: StatoSito | null;
   diagnostica: unknown; // analisi_sito/segnali_dimensione/segnali_vitalita/componenti/motivazione — solo per i Logs, non colonne di lista
@@ -102,12 +104,14 @@ C. Vitalità commerciale — fino a 20 punti: operativa con recensioni/rating ch
 
 Fasce sul totale: 70-100 alto, 40-69 medio, 1-39 basso, 0 con escludi_da_pipeline true → escluso.
 
-REGOLE DI ESCLUSIONE HARD (sovrascrivono tutto): imposta escludi_da_pipeline=true e punteggio ≤10 se rilevi anche solo una di: attività chiaramente catena/franchising in rete/multinazionale; sito classificato "performante"; attività chiusa temporaneamente o definitivamente. Motiva sempre quale regola ha scattato in motivo_esclusione.
+REGOLE DI ESCLUSIONE HARD (sovrascrivono tutto): imposta escludi_da_pipeline=true e punteggio ≤10 se rilevi anche solo una di: attività chiaramente catena/franchising in rete/multinazionale; sito classificato "performante"; attività chiusa temporaneamente o definitivamente. Motiva sempre quale regola ha scattato in motivo_esclusione (lascia motivo_pipeline a null in questo caso).
+
+Se NON escludi il lead, spiega sempre in motivo_pipeline (1-2 frasi) perché merita di entrare in pipeline — es. "nessun sito, attività consolidata con buone recensioni" o "sito datato, micro impresa a gestione familiare facilmente raggiungibile" (lascia motivo_esclusione a null in questo caso).
 
 Se un dato manca, non inventarlo: tratta l'assenza come segnale (es. sito assente) e scrivilo nelle note. Se il sito non è raggiungibile (codice HTTP assente/errore), trattalo come sito abbandonato o assente secondo la gravità, e scrivilo nelle note — è una stima da un fallimento di accesso, non un'analisi completa del contenuto.
 
 Rispondi SOLO con un oggetto JSON valido, nessun testo prima o dopo, con questa struttura esatta:
-{"punteggio": 0, "fascia": "alto|medio|basso|escluso", "escludi_da_pipeline": false, "motivo_esclusione": null, "descrizione": "2-4 frasi in italiano su chi è l'attività, che presenza digitale ha, perché è o non è un buon lead", "analisi_sito": {"stato_sito": "assente|datato|base|performante", "note": "..."}, "segnali_dimensione": {"tipo_attivita": "micro_impresa|pmi|struttura_locale_piu_grande|catena_franchising|multinazionale|sconosciuto", "note": "..."}, "segnali_vitalita": {"stato": "attiva_consolidata|attiva_nuova_apertura|attiva_dati_scarsi|segnali_di_calo|non_operativa", "note": "..."}, "punteggio_componenti": {"opportunita_sito": 0, "idoneita_dimensionale": 0, "vitalita": 0}, "motivazione_punteggio": ["punto 1 breve", "punto 2 breve"]}`;
+{"punteggio": 0, "fascia": "alto|medio|basso|escluso", "escludi_da_pipeline": false, "motivo_esclusione": null, "motivo_pipeline": "...", "descrizione": "2-4 frasi in italiano su chi è l'attività, che presenza digitale ha, perché è o non è un buon lead", "analisi_sito": {"stato_sito": "assente|datato|base|performante", "note": "..."}, "segnali_dimensione": {"tipo_attivita": "micro_impresa|pmi|struttura_locale_piu_grande|catena_franchising|multinazionale|sconosciuto", "note": "..."}, "segnali_vitalita": {"stato": "attiva_consolidata|attiva_nuova_apertura|attiva_dati_scarsi|segnali_di_calo|non_operativa", "note": "..."}, "punteggio_componenti": {"opportunita_sito": 0, "idoneita_dimensionale": 0, "vitalita": 0}, "motivazione_punteggio": ["punto 1 breve", "punto 2 breve"]}`;
 
 async function callOpenAi(params: {
   businessName: string;
@@ -188,6 +192,7 @@ ${wc?.pageText ? `Testo estratto dal sito (troncato):\n"""${wc.pageText}"""` : "
         fascia?: string;
         escludi_da_pipeline?: boolean;
         motivo_esclusione?: string | null;
+        motivo_pipeline?: string | null;
         descrizione?: string;
         analisi_sito?: { stato_sito?: string };
         [key: string]: unknown;
@@ -218,6 +223,7 @@ ${wc?.pageText ? `Testo estratto dal sito (troncato):\n"""${wc.pageText}"""` : "
         fascia: parsed.fascia as Fascia,
         escludiDaPipeline: parsed.escludi_da_pipeline,
         motivoEsclusione: typeof parsed.motivo_esclusione === "string" ? parsed.motivo_esclusione : null,
+        motivoPipeline: typeof parsed.motivo_pipeline === "string" ? parsed.motivo_pipeline : null,
         descrizione: parsed.descrizione.slice(0, 800),
         statoSito,
         diagnostica: {
@@ -261,6 +267,7 @@ export async function ensureAiAttributes(
     },
     { key: AI_EXCLUDE_ATTR_KEY, name: "Escludi da pipeline", type: "boolean", position: 103 },
     { key: AI_EXCLUDE_REASON_ATTR_KEY, name: "Motivo esclusione", type: "text", position: 104 },
+    { key: AI_INCLUDE_REASON_ATTR_KEY, name: "Motivo pipeline", type: "text", position: 105 },
   ];
 
   const attrs = await Promise.all(
@@ -345,6 +352,15 @@ export async function runAiAnalysisForPlace(
         value: result.motivoEsclusione ?? "",
       },
       update: { value: result.motivoEsclusione ?? "" },
+    }),
+    db.placeCustomValue.upsert({
+      where: { listAttributeId_placeId: { listAttributeId: attrs[AI_INCLUDE_REASON_ATTR_KEY], placeId: place.id } },
+      create: {
+        listAttributeId: attrs[AI_INCLUDE_REASON_ATTR_KEY],
+        placeId: place.id,
+        value: result.motivoPipeline ?? "",
+      },
+      update: { value: result.motivoPipeline ?? "" },
     }),
     ...(websiteStatusOverride
       ? [db.place.update({ where: { id: place.id }, data: { websiteStatus: websiteStatusOverride } })]

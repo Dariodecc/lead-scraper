@@ -13,10 +13,13 @@ import {
 
 interface PlaceDetail {
   id: string;
+  placeId: string;
   listId: string;
   businessName: string;
   category: string | null;
   address: string;
+  lat: string;
+  lng: string;
   phone: string | null;
   websiteUrl: string | null;
   websiteStatus: string;
@@ -27,7 +30,12 @@ interface PlaceDetail {
   estimatedOpeningWindow: string;
   estimationConfidence: string;
   confirmedOpeningDate: string | null;
+  earliestReviewDate: string | null;
+  firstSeenAt: string;
   deliveryStatus: string;
+  deliveryAttempts: number;
+  lastDeliveryAttemptAt: string | null;
+  createdAt: string;
   customAttributes: Record<string, unknown>;
 }
 
@@ -217,6 +225,14 @@ export default function PlaceDetailPage() {
         >
           {DELIVERY_STATUS_LABEL[place.deliveryStatus]}
         </span>
+        <a
+          href={`https://www.google.com/maps/place/?q=place_id:${place.placeId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs font-medium underline"
+        >
+          Vedi su Google Maps ↗
+        </a>
       </div>
       <p className="mb-8 text-sm text-muted-foreground">
         {place.category ?? "—"} · {place.address}
@@ -291,6 +307,25 @@ export default function PlaceDetailPage() {
                   value={new Date(place.confirmedOpeningDate).toLocaleDateString("it-IT")}
                 />
               )}
+              <Row
+                label="Recensione più vecchia"
+                value={
+                  place.earliestReviewDate
+                    ? new Date(place.earliestReviewDate).toLocaleDateString("it-IT")
+                    : "Nessun dato"
+                }
+              />
+              <Row label="Coordinate" value={<span className="font-mono">{place.lat}, {place.lng}</span>} />
+              <Row label="Google Place ID" value={<span className="font-mono text-[11px]">{place.placeId}</span>} />
+              <Row label="Prima comparsa" value={new Date(place.firstSeenAt).toLocaleString("it-IT")} />
+              <Row
+                label="Tentativi di consegna"
+                value={
+                  place.lastDeliveryAttemptAt
+                    ? `${place.deliveryAttempts} · ultimo ${new Date(place.lastDeliveryAttemptAt).toLocaleString("it-IT")}`
+                    : "Nessuno ancora"
+                }
+              />
             </div>
           </div>
 

@@ -76,7 +76,7 @@ export default function RicerchePage() {
           {COLUMNS.map((col) => (
             <span
               key={col}
-              className={`text-xs font-medium uppercase tracking-wide text-muted-foreground ${col === "Azioni" ? "text-right" : ""}`}
+              className={`min-w-0 text-xs font-medium uppercase tracking-wide text-muted-foreground ${col === "Azioni" ? "text-right" : ""}`}
             >
               {col}
             </span>
@@ -95,14 +95,14 @@ export default function RicerchePage() {
             className="grid cursor-pointer grid-cols-[1.7fr_1fr_1fr_0.85fr_0.75fr_1fr_1.6fr] items-center gap-x-3 border-b border-hairline-soft px-5 py-4"
             onClick={() => router.push(`/ricerche/${s.id}`)}
           >
-            <span className="truncate text-sm font-medium" title={s.title}>
+            <span className="min-w-0 truncate text-sm font-medium" title={s.title}>
               {s.title}
             </span>
-            <span className="truncate text-[13px]">{s.areaLabel}</span>
-            <span className="truncate text-[13px]">{placeTypeLabel(s.categoryPlaceType)}</span>
-            <span className="text-[13px]">{FREQ_LABEL[s.frequency]}</span>
+            <span className="min-w-0 truncate text-[13px]">{s.areaLabel}</span>
+            <span className="min-w-0 truncate text-[13px]">{placeTypeLabel(s.categoryPlaceType)}</span>
+            <span className="min-w-0 text-[13px]">{FREQ_LABEL[s.frequency]}</span>
             <span
-              className={`w-fit rounded-full px-3 py-0.5 text-xs font-medium ${
+              className={`min-w-0 w-fit rounded-full px-3 py-0.5 text-xs font-medium ${
                 s.status === "active"
                   ? "bg-success/10 text-success"
                   : s.status === "paused"
@@ -112,10 +112,10 @@ export default function RicerchePage() {
             >
               {STATUS_LABEL[s.status]}
             </span>
-            <span className="text-xs text-muted-foreground">
+            <span className="min-w-0 text-xs text-muted-foreground">
               {s.status === "active" ? "vedi dettaglio" : "—"}
             </span>
-            <span className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+            <span className="min-w-0 flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
               <button
                 className="rounded-md border border-border bg-background px-2 py-1.5 text-[11.5px] font-semibold whitespace-nowrap"
                 onClick={(e) => runTest(s, e)}

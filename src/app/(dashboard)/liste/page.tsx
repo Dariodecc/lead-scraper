@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { NewListDrawer } from "@/components/liste/new-list-drawer";
 import { AttributesPanel, type ListAttribute } from "@/components/liste/attributes-panel";
-import { DELIVERY_STATUS_LABEL, resolveFixedFieldDisplay } from "@/lib/placeFields";
+import { DELIVERY_STATUS_LABEL } from "@/lib/placeFields";
 import type { DeliveryRules } from "@/lib/deliveryRules";
 
 interface ListOverview {
@@ -41,8 +41,6 @@ interface PlaceRow {
   values: string[];
 }
 
-type RawPlace = Parameters<typeof resolveFixedFieldDisplay>[0];
-
 const STATUS_FILTERS = [
   { value: "all", label: "Tutti" },
   { value: "pending", label: "Nuovo" },
@@ -65,7 +63,6 @@ export default function ListePage() {
   const [detail, setDetail] = useState<ListDetail | null>(null);
   const [columns, setColumns] = useState<{ key: string; label: string }[]>([]);
   const [places, setPlaces] = useState<PlaceRow[]>([]);
-  const [samplePlace, setSamplePlace] = useState<RawPlace | null>(null);
   const [newListOpen, setNewListOpen] = useState(false);
   const [attrsOpen, setAttrsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -86,14 +83,12 @@ export default function ListePage() {
   }, []);
 
   const loadDetail = useCallback(async (id: string, p = 1, status = "all") => {
-    const [detailRes, placesRes, rawPlacesRes] = await Promise.all([
+    const [detailRes, placesRes] = await Promise.all([
       fetch(`/api/lists/${id}`),
       fetch(`/api/lists/${id}/places?page=${p}&pageSize=25&deliveryStatus=${status}`),
-      fetch(`/api/places?listId=${id}`),
     ]);
     const detailData = await detailRes.json();
     const placesData = await placesRes.json();
-    const rawPlacesData = await rawPlacesRes.json();
     setDetail({
       id: detailData.list.id,
       name: detailData.list.name,
@@ -113,7 +108,6 @@ export default function ListePage() {
     setPlaces(placesData.places ?? []);
     setTotalPages(placesData.totalPages ?? 1);
     setTotal(placesData.total ?? 0);
-    setSamplePlace(rawPlacesData.places?.[0] ?? null);
     setSelectedRows(new Set());
   }, []);
 
@@ -246,7 +240,7 @@ export default function ListePage() {
               className="h-10 rounded-md border border-border bg-background px-4 text-sm font-semibold"
               onClick={() => setAttrsOpen((v) => !v)}
             >
-              Attributi
+              Modifica
             </button>
             <button
               className="h-10 rounded-md border border-destructive/30 bg-background px-4 text-sm font-semibold text-destructive"
@@ -262,7 +256,6 @@ export default function ListePage() {
             listId={detail.id}
             attributes={detail.attributes}
             visibleFields={detail.visibleFields}
-            samplePlace={samplePlace}
             deliveryRules={detail.deliveryRules}
             excludeChainsThreshold={detail.excludeChainsThreshold}
             aiAnalysisEnabled={detail.aiAnalysisEnabled}
@@ -310,18 +303,19 @@ export default function ListePage() {
                 checked={places.length > 0 && selectedRows.size === places.length}
                 onChange={toggleAllRows}
               />
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="min-w-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Attività
               </span>
               {columns.map((c) => (
                 <span
                   key={c.key}
-                  className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                  className="min-w-0 truncate text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                  title={c.label}
                 >
                   {c.label}
                 </span>
               ))}
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="min-w-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Consegna
               </span>
               <span />
@@ -343,19 +337,19 @@ export default function ListePage() {
                   onChange={() => toggleRow(p.id)}
                 />
                 <span
-                  className="cursor-pointer"
+                  className="min-w-0 cursor-pointer"
                   onClick={() => router.push(`/liste/${detail.id}/${p.id}`)}
                 >
                   <div className="truncate text-sm font-medium">{p.name}</div>
                   <div className="truncate text-xs text-muted-soft">{p.address}</div>
                 </span>
                 {p.values.map((v, i) => (
-                  <span key={i} className="truncate text-[13px]" title={v}>
+                  <span key={i} className="min-w-0 truncate text-[13px]" title={v}>
                     {v}
                   </span>
                 ))}
                 <span
-                  className={`w-fit rounded-full px-3 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[p.deliveryStatus] ?? "bg-muted text-muted-foreground"}`}
+                  className={`min-w-0 w-fit rounded-full px-3 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[p.deliveryStatus] ?? "bg-muted text-muted-foreground"}`}
                 >
                   {DELIVERY_STATUS_LABEL[p.deliveryStatus]}
                 </span>

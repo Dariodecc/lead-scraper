@@ -112,7 +112,7 @@ export default function LogsPage() {
         <div style={{ minWidth: 900 }}>
           <div className="grid grid-cols-[0.8fr_1.1fr_2fr_1.1fr_0.8fr_1.3fr_1fr] gap-x-4 border-b border-border bg-muted px-5 py-3">
             {COLUMNS.map((col) => (
-              <span key={col} className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <span key={col} className="min-w-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {col}
               </span>
             ))}
@@ -129,18 +129,18 @@ export default function LogsPage() {
               key={log.id}
               className="grid grid-cols-[0.8fr_1.1fr_2fr_1.1fr_0.8fr_1.3fr_1fr] items-center gap-x-4 border-b border-hairline-soft px-5 py-3.5"
             >
-              <span className={`w-fit rounded-full px-3 py-0.5 text-xs font-medium ${LEVEL_STYLE[log.level]}`}>
+              <span className={`min-w-0 w-fit rounded-full px-3 py-0.5 text-xs font-medium ${LEVEL_STYLE[log.level]}`}>
                 {LEVEL_LABEL[log.level]}
               </span>
-              <span className="text-[13px]">{CATEGORY_LABEL[log.category] ?? log.category}</span>
-              <span className="truncate font-mono text-[13px]" title={log.message}>
+              <span className="min-w-0 truncate text-[13px]">{CATEGORY_LABEL[log.category] ?? log.category}</span>
+              <span className="min-w-0 truncate font-mono text-[13px]" title={log.message}>
                 {log.message}
               </span>
-              <span className="text-[13px] text-muted-foreground">{log.search?.title ?? "—"}</span>
-              <span className="text-[13px] text-muted-foreground">
+              <span className="min-w-0 truncate text-[13px] text-muted-foreground">{log.search?.title ?? "—"}</span>
+              <span className="min-w-0 text-[13px] text-muted-foreground">
                 {log.costUsd != null ? `$${Number(log.costUsd).toFixed(4)}` : "—"}
               </span>
-              <span className="text-xs text-muted-soft">{new Date(log.createdAt).toLocaleString("it-IT")}</span>
+              <span className="min-w-0 text-xs text-muted-soft">{new Date(log.createdAt).toLocaleString("it-IT")}</span>
               {RETRYABLE_CATEGORIES.has(log.category) && log.level === "error" && log.placeId ? (
                 <button
                   disabled={retrying[log.id]}
