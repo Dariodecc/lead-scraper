@@ -71,6 +71,8 @@ export default function ListePage() {
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -83,9 +85,14 @@ export default function ListePage() {
   }, []);
 
   const loadDetail = useCallback(async (id: string, p = 1, status = "all") => {
+    const params = new URLSearchParams({ page: String(p), pageSize: "25", deliveryStatus: status });
+    if (sortBy) {
+      params.set("sortBy", sortBy);
+      params.set("sortDir", sortDir);
+    }
     const [detailRes, placesRes] = await Promise.all([
       fetch(`/api/lists/${id}`),
-      fetch(`/api/lists/${id}/places?page=${p}&pageSize=25&deliveryStatus=${status}`),
+      fetch(`/api/lists/${id}/places?${params.toString()}`),
     ]);
     const detailData = await detailRes.json();
     const placesData = await placesRes.json();
@@ -109,7 +116,7 @@ export default function ListePage() {
     setTotalPages(placesData.totalPages ?? 1);
     setTotal(placesData.total ?? 0);
     setSelectedRows(new Set());
-  }, []);
+  }, [sortBy, sortDir]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch dati iniziali al mount
@@ -174,6 +181,18 @@ export default function ListePage() {
 
   function toggleAllRows() {
     setSelectedRows((s) => (s.size === places.length ? new Set() : new Set(places.map((p) => p.id))));
+  }
+
+  function toggleSort(key: string) {
+    setPage(1);
+    if (sortBy !== key) {
+      setSortBy(key);
+      setSortDir("desc");
+    } else if (sortDir === "desc") {
+      setSortDir("asc");
+    } else {
+      setSortBy(null);
+    }
   }
 
   async function deletePlace(id: string) {
@@ -309,10 +328,12 @@ export default function ListePage() {
               {columns.map((c) => (
                 <span
                   key={c.key}
-                  className="min-w-0 truncate text-xs font-medium uppercase tracking-wide text-muted-foreground"
-                  title={c.label}
+                  className="min-w-0 flex cursor-pointer items-center gap-1 truncate text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
+                  title={`Ordina per ${c.label}`}
+                  onClick={() => toggleSort(c.key)}
                 >
-                  {c.label}
+                  <span className="truncate">{c.label}</span>
+                  {sortBy === c.key && <span className="shrink-0">{sortDir === "desc" ? "↓" : "↑"}</span>}
                 </span>
               ))}
               <span className="min-w-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">

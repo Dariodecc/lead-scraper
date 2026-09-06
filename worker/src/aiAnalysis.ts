@@ -2,6 +2,7 @@ import type { List, Place, PrismaClient } from "@prisma/client";
 import { getOpenAiApiKey, getOpenAiCostRates } from "./settings";
 import { makeLogger } from "./log";
 import type { WebsiteCheckResult } from "./websiteCheck";
+import { getFirstSeenYear } from "./domainAge";
 
 // Analisi AI del sito (opt-in per Lista, §7.2 Attributi) — non giudica solo il sito, ma la
 // potenzialità del lead nel suo complesso (attività + sito + segnali raccolti). Schema di output
@@ -15,6 +16,7 @@ export const AI_FASCIA_ATTR_KEY = "fascia_ai"; // alto | medio | basso | escluso
 export const AI_EXCLUDE_ATTR_KEY = "escludi_pipeline_ai"; // boolean
 export const AI_EXCLUDE_REASON_ATTR_KEY = "motivo_esclusione_ai"; // testo, vuoto se non escluso
 export const AI_INCLUDE_REASON_ATTR_KEY = "motivo_pipeline_ai"; // testo, vuoto se escluso — perché merita di entrare in pipeline
+export const AI_SITE_AGE_ATTR_KEY = "sito_online_dal_ai"; // anno (numero), da Wayback Machine — dato reale, non stimato dall'AI
 
 // gpt-4o-mini occasionalmente doppio-codifica caratteri accentati nelle stringhe JSON (scrive la
 // sequenza di byte UTF-8 di una lettera accentata come se ciascun byte fosse un codepoint Latin-1
@@ -95,9 +97,9 @@ DA ESCLUDERE (punteggio basso/nullo, priorità sul resto):
 
 DATI CHE RICEVI: dati Google Places dell'attività (nome, indirizzo, categoria, rating, numero recensioni, fascia prezzo, stato attività, stima apertura con relativa confidenza) — tutti possono mancare, un dato mancante è un segnale debole, non un errore. rating/review_count/price_level sono proxy di traffico/vitalità, non misure di dimensione aziendale. Non interpretare mai la stima di apertura senza guardare anche la sua confidenza insieme.
 
-ANALISI DEL SITO: ricevi anche segnali TECNICI REALI già rilevati (raggiungibilità/codice HTTP, HTTPS sì/no, redirect verso un dominio diverso da quello atteso) — usali come fatti osservati, non indovinare questi aspetti. Ricevi inoltre il testo estratto dalla pagina (se raggiungibile): valutaci design/cura percepita, coerenza dei contenuti, presenza di funzionalità utili al settore, segnali di abbandono (date vecchie, contenuti incoerenti). Classifica lo stato del sito in una di quattro fasce: "assente" (nessun sito reale, o solo social/aggregatore/scheda Google), "datato" (esiste ma abbandonato/rotto/non curato), "base" (esiste e funziona ma è generico o superato, opportunità reale di miglioramento), "performante" (curato e moderno — il caso da escludere/penalizzare).
+ANALISI DEL SITO: ricevi anche segnali TECNICI REALI già rilevati (raggiungibilità/codice HTTP, HTTPS sì/no, redirect verso un dominio diverso da quello atteso, anno della prima scansione del dominio su Wayback Machine se disponibile) — usali come fatti osservati, non indovinare questi aspetti. IMPORTANTE sul testo estratto: è SOLO testo — non puoi vedere design, colori, immagini, qualità grafica reale. Non dedurre "sito curato/moderno" dalla sola presenza di contenuti ben scritti o funzionalità elencate a parole: senza segnali concreti (mobile, funzionalità booking/e-commerce funzionanti citate esplicitamente, coerenza date) resta cauto e preferisci "base" a "performante" in caso di dubbio — "performante" va riservato a siti per cui hai indizi chiari di cura visiva reale (es. il testo stesso descrive un design moderno, o menzioni esplicite di funzionalità avanzate), non assegnato di default a un sito semplicemente "ben scritto". Sull'anzianità del dominio: un dominio online da molti anni ma con sito attualmente datato/base è un segnale forte di opportunità (probabilmente non reinvestono nel sito da tempo); un dominio online da molti anni ma con sito attualmente ben curato indica un'attività che reinveste periodicamente nella propria presenza web (segnale più neutro, non un'esclusione). Classifica lo stato del sito in una di quattro fasce: "assente" (nessun sito reale, o solo social/aggregatore/scheda Google), "datato" (esiste ma abbandonato/rotto/non curato), "base" (esiste e funziona ma è generico, superato, o semplicemente non hai abbastanza segnali per dire di più — è la scelta di default in caso di incertezza), "performante" (indizi chiari di cura visiva/funzionale reale — il caso da escludere/penalizzare).
 
-PUNTEGGIO 0-100 = somma di tre componenti, poi eventualmente azzerato dalle esclusioni hard sotto:
+PUNTEGGIO 0-100 = somma di tre componenti — calcola la somma con attenzione, il totale che scrivi in "punteggio" deve corrispondere esattamente ad A+B+C sotto (non arrotondare per fasce, sommali davvero) — poi eventualmente azzerato dalle esclusioni hard sotto:
 A. Opportunità sito — fino a 50 punti: assente/equivalente 45-50, datato/abbandonato 35-44, base ma funzionante 15-34, performante 0-10.
 B. Idoneità dimensionale — fino a 30 punti: micro impresa/gestione singola 25-30, PMI locale poche sedi 15-24, realtà più strutturata ma locale/indipendente 5-14, catena/multinazionale 0 (ed escludi_da_pipeline true).
 C. Vitalità commerciale — fino a 20 punti: operativa con recensioni/rating che indicano traffico reale o apertura recente 15-20, operativa con pochi segnali/dati scarsi 8-14, operativa con segnali deboli di calo 3-7, chiusa 0 (ed escludi_da_pipeline true).
@@ -125,6 +127,7 @@ async function callOpenAi(params: {
   estimatedOpeningWindow: string;
   estimationConfidence: string;
   websiteCheck: WebsiteCheckResult | null;
+  firstSeenYear: number | null;
   customPromptMd: string | null;
 }): Promise<{ ok: true; result: AiAnalysisResult; costUsd: number } | { ok: false; error: string }> {
   let apiKey: string;
@@ -137,7 +140,7 @@ async function callOpenAi(params: {
   const wc = params.websiteCheck;
   const technicalSignals = params.websiteUrl
     ? wc
-      ? `Segnali tecnici reali rilevati: codice risposta HTTP ${wc.httpStatus ?? "nessuna risposta (sito irraggiungibile)"}; HTTPS: ${wc.isHttps == null ? "n/d" : wc.isHttps ? "sì" : "no"}; ${wc.redirectedToDifferentDomain ? `redirect verso un dominio diverso (${wc.finalUrl}) — possibile dominio scaduto/parcheggiato` : "nessun redirect verso un altro dominio"}.`
+      ? `Segnali tecnici reali rilevati: codice risposta HTTP ${wc.httpStatus ?? "nessuna risposta (sito irraggiungibile)"}; HTTPS: ${wc.isHttps == null ? "n/d" : wc.isHttps ? "sì" : "no"}; ${wc.redirectedToDifferentDomain ? `redirect verso un dominio diverso (${wc.finalUrl}) — possibile dominio scaduto/parcheggiato` : "nessun redirect verso un altro dominio"}; dominio online (prima scansione nota su Wayback Machine) dal: ${params.firstSeenYear ?? "dato non disponibile"}.`
       : "Nessun controllo tecnico disponibile per questo sito."
     : "Nessun sito web presente.";
 
@@ -215,12 +218,41 @@ ${wc?.pageText ? `Testo estratto dal sito (troncato):\n"""${wc.pageText}"""` : "
     const statoSitoRaw = parsed.analisi_sito?.stato_sito;
     const statoSito = VALID_STATO_SITO.includes(statoSitoRaw as StatoSito) ? (statoSitoRaw as StatoSito) : null;
 
+    // I modelli non sommano in modo affidabile anche quando gli si chiede esplicitamente A+B+C —
+    // osservato dal vivo (sotto-punteggi 35+30+20=85 riportati insieme a un punteggio totale di
+    // 55). Se il modello fornisce i tre componenti numerici, l'aritmetica la rifacciamo noi (e
+    // deriviamo la fascia dal punteggio corretto) invece di fidarci del totale che ha scritto.
+    const componenti = parsed.punteggio_componenti as
+      | { opportunita_sito?: number; idoneita_dimensionale?: number; vitalita?: number }
+      | undefined;
+    const componentiValide =
+      componenti &&
+      typeof componenti.opportunita_sito === "number" &&
+      typeof componenti.idoneita_dimensionale === "number" &&
+      typeof componenti.vitalita === "number";
+    const punteggioCorretto = componentiValide
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(componenti.opportunita_sito! + componenti.idoneita_dimensionale! + componenti.vitalita!),
+          ),
+        )
+      : Math.max(0, Math.min(100, Math.round(parsed.punteggio)));
+    const fasciaCorretta: Fascia = parsed.escludi_da_pipeline
+      ? "escluso"
+      : punteggioCorretto >= 70
+        ? "alto"
+        : punteggioCorretto >= 40
+          ? "medio"
+          : "basso";
+
     return {
       ok: true,
       costUsd,
       result: {
-        punteggio: Math.max(0, Math.min(100, Math.round(parsed.punteggio))),
-        fascia: parsed.fascia as Fascia,
+        punteggio: punteggioCorretto,
+        fascia: fasciaCorretta,
         escludiDaPipeline: parsed.escludi_da_pipeline,
         motivoEsclusione: typeof parsed.motivo_esclusione === "string" ? parsed.motivo_esclusione : null,
         motivoPipeline: typeof parsed.motivo_pipeline === "string" ? parsed.motivo_pipeline : null,
@@ -268,6 +300,7 @@ export async function ensureAiAttributes(
     { key: AI_EXCLUDE_ATTR_KEY, name: "Escludi da pipeline", type: "boolean", position: 103 },
     { key: AI_EXCLUDE_REASON_ATTR_KEY, name: "Motivo esclusione", type: "text", position: 104 },
     { key: AI_INCLUDE_REASON_ATTR_KEY, name: "Motivo pipeline", type: "text", position: 105 },
+    { key: AI_SITE_AGE_ATTR_KEY, name: "Sito online dal", type: "number", position: 106 },
   ];
 
   const attrs = await Promise.all(
@@ -295,6 +328,7 @@ export async function runAiAnalysisForPlace(
   params: { websiteCheck: WebsiteCheckResult | null; searchId?: string | null },
 ): Promise<{ success: boolean; excludeFromPipeline: boolean; excludeReason?: string }> {
   const log = makeLogger(db);
+  const firstSeenYear = place.websiteUrl ? await getFirstSeenYear(place.websiteUrl) : null;
   const outcome = await callOpenAi({
     businessName: place.businessName,
     category: place.category,
@@ -307,6 +341,7 @@ export async function runAiAnalysisForPlace(
     estimatedOpeningWindow: place.estimatedOpeningWindow,
     estimationConfidence: place.estimationConfidence,
     websiteCheck: params.websiteCheck,
+    firstSeenYear,
     customPromptMd: list.aiPromptMd,
   });
 
@@ -362,6 +397,15 @@ export async function runAiAnalysisForPlace(
       },
       update: { value: result.motivoPipeline ?? "" },
     }),
+    ...(firstSeenYear != null
+      ? [
+          db.placeCustomValue.upsert({
+            where: { listAttributeId_placeId: { listAttributeId: attrs[AI_SITE_AGE_ATTR_KEY], placeId: place.id } },
+            create: { listAttributeId: attrs[AI_SITE_AGE_ATTR_KEY], placeId: place.id, value: firstSeenYear },
+            update: { value: firstSeenYear },
+          }),
+        ]
+      : []),
     ...(websiteStatusOverride
       ? [db.place.update({ where: { id: place.id }, data: { websiteStatus: websiteStatusOverride } })]
       : []),
