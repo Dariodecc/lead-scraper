@@ -12,7 +12,6 @@ import { getFirstSeenYear } from "./domainAge";
 // chiusa) — l'esclusione alimenta lo stesso meccanismo già usato per le catene rilevate a testo.
 export const AI_ANALYSIS_ATTR_KEY = "analisi_ai"; // descrizione (testo)
 export const AI_SCORE_ATTR_KEY = "punteggio_ai"; // 0-100 (era 0-10 prima di questa revisione)
-export const AI_FASCIA_ATTR_KEY = "fascia_ai"; // alto | medio | basso | escluso
 export const AI_EXCLUDE_ATTR_KEY = "escludi_pipeline_ai"; // boolean
 export const AI_EXCLUDE_REASON_ATTR_KEY = "motivo_esclusione_ai"; // testo, vuoto se non escluso
 export const AI_INCLUDE_REASON_ATTR_KEY = "motivo_pipeline_ai"; // testo, vuoto se escluso — perché merita di entrare in pipeline
@@ -62,14 +61,11 @@ function deepFixMojibake<T>(value: T): T {
 }
 
 const MODEL = "gpt-4o-mini";
-const VALID_FASCIA = ["alto", "medio", "basso", "escluso"] as const;
-type Fascia = (typeof VALID_FASCIA)[number];
 const VALID_STATO_SITO = ["assente", "datato", "base", "performante"] as const;
 type StatoSito = (typeof VALID_STATO_SITO)[number];
 
 interface AiAnalysisResult {
   punteggio: number;
-  fascia: Fascia;
   escludiDaPipeline: boolean;
   motivoEsclusione: string | null;
   motivoPipeline: string | null;
@@ -113,7 +109,7 @@ Se NON escludi il lead, spiega sempre in motivo_pipeline (1-2 frasi) perché mer
 Se un dato manca, non inventarlo: tratta l'assenza come segnale (es. sito assente) e scrivilo nelle note. Se il sito non è raggiungibile (codice HTTP assente/errore), trattalo come sito abbandonato o assente secondo la gravità, e scrivilo nelle note — è una stima da un fallimento di accesso, non un'analisi completa del contenuto.
 
 Rispondi SOLO con un oggetto JSON valido, nessun testo prima o dopo, con questa struttura esatta:
-{"punteggio": 0, "fascia": "alto|medio|basso|escluso", "escludi_da_pipeline": false, "motivo_esclusione": null, "motivo_pipeline": "...", "descrizione": "2-4 frasi in italiano su chi è l'attività, che presenza digitale ha, perché è o non è un buon lead", "analisi_sito": {"stato_sito": "assente|datato|base|performante", "note": "..."}, "segnali_dimensione": {"tipo_attivita": "micro_impresa|pmi|struttura_locale_piu_grande|catena_franchising|multinazionale|sconosciuto", "note": "..."}, "segnali_vitalita": {"stato": "attiva_consolidata|attiva_nuova_apertura|attiva_dati_scarsi|segnali_di_calo|non_operativa", "note": "..."}, "punteggio_componenti": {"opportunita_sito": 0, "idoneita_dimensionale": 0, "vitalita": 0}, "motivazione_punteggio": ["punto 1 breve", "punto 2 breve"]}`;
+{"punteggio": 0, "escludi_da_pipeline": false, "motivo_esclusione": null, "motivo_pipeline": "...", "descrizione": "2-4 frasi in italiano su chi è l'attività, che presenza digitale ha, perché è o non è un buon lead", "analisi_sito": {"stato_sito": "assente|datato|base|performante", "note": "..."}, "segnali_dimensione": {"tipo_attivita": "micro_impresa|pmi|struttura_locale_piu_grande|catena_franchising|multinazionale|sconosciuto", "note": "..."}, "segnali_vitalita": {"stato": "attiva_consolidata|attiva_nuova_apertura|attiva_dati_scarsi|segnali_di_calo|non_operativa", "note": "..."}, "punteggio_componenti": {"opportunita_sito": 0, "idoneita_dimensionale": 0, "vitalita": 0}, "motivazione_punteggio": ["punto 1 breve", "punto 2 breve"]}`;
 
 async function callOpenAi(params: {
   businessName: string;
@@ -207,7 +203,6 @@ ${params.visionEnabled && wc?.screenshotBase64 ? "In allegato a questo messaggio
     const parsed = deepFixMojibake(
       JSON.parse(content) as {
         punteggio?: number;
-        fascia?: string;
         escludi_da_pipeline?: boolean;
         motivo_esclusione?: string | null;
         motivo_pipeline?: string | null;
@@ -220,13 +215,12 @@ ${params.visionEnabled && wc?.screenshotBase64 ? "In allegato a questo messaggio
     if (
       typeof parsed.punteggio !== "number" ||
       typeof parsed.descrizione !== "string" ||
-      typeof parsed.escludi_da_pipeline !== "boolean" ||
-      !VALID_FASCIA.includes(parsed.fascia as Fascia)
+      typeof parsed.escludi_da_pipeline !== "boolean"
     ) {
       return {
         ok: false,
         error:
-          "Risposta AI non nel formato atteso (mancano punteggio/fascia/escludi_da_pipeline/descrizione) — verifica il prompt personalizzato della lista",
+          "Risposta AI non nel formato atteso (mancano punteggio/escludi_da_pipeline/descrizione) — verifica il prompt personalizzato della lista",
       };
     }
 
@@ -235,8 +229,8 @@ ${params.visionEnabled && wc?.screenshotBase64 ? "In allegato a questo messaggio
 
     // I modelli non sommano in modo affidabile anche quando gli si chiede esplicitamente A+B+C —
     // osservato dal vivo (sotto-punteggi 35+30+20=85 riportati insieme a un punteggio totale di
-    // 55). Se il modello fornisce i tre componenti numerici, l'aritmetica la rifacciamo noi (e
-    // deriviamo la fascia dal punteggio corretto) invece di fidarci del totale che ha scritto.
+    // 55). Se il modello fornisce i tre componenti numerici, l'aritmetica la rifacciamo noi invece
+    // di fidarci del totale che ha scritto.
     const componenti = parsed.punteggio_componenti as
       | { opportunita_sito?: number; idoneita_dimensionale?: number; vitalita?: number }
       | undefined;
@@ -255,24 +249,16 @@ ${params.visionEnabled && wc?.screenshotBase64 ? "In allegato a questo messaggio
         )
       : Math.max(0, Math.min(100, Math.round(parsed.punteggio)));
     // L'esclusione è una regola hard che sovrascrive tutto (§rubrica: "punteggio ≤10") — il
-    // modello a volte la applica solo al flag/fascia dimenticando di abbassare anche i componenti
+    // modello a volte la applica solo al flag dimenticando di abbassare anche i componenti
     // (osservato dal vivo: escludi_da_pipeline=true ma componenti sommati a 44). La forziamo qui,
     // non ci si può fidare che il modello tenga i due allineati da solo.
     const punteggioCorretto = parsed.escludi_da_pipeline ? Math.min(punteggioSommato, 10) : punteggioSommato;
-    const fasciaCorretta: Fascia = parsed.escludi_da_pipeline
-      ? "escluso"
-      : punteggioCorretto >= 70
-        ? "alto"
-        : punteggioCorretto >= 40
-          ? "medio"
-          : "basso";
 
     return {
       ok: true,
       costUsd,
       result: {
         punteggio: punteggioCorretto,
-        fascia: fasciaCorretta,
         escludiDaPipeline: parsed.escludi_da_pipeline,
         motivoEsclusione: typeof parsed.motivo_esclusione === "string" ? parsed.motivo_esclusione : null,
         motivoPipeline: typeof parsed.motivo_pipeline === "string" ? parsed.motivo_pipeline : null,
@@ -310,13 +296,6 @@ export async function ensureAiAttributes(
   const defs: { key: string; name: string; type: "text" | "number" | "boolean" | "select"; position: number; options?: unknown }[] = [
     { key: AI_ANALYSIS_ATTR_KEY, name: "Analisi", type: "text", position: 100 },
     { key: AI_SCORE_ATTR_KEY, name: "Punteggio contattabilità", type: "number", position: 101 },
-    {
-      key: AI_FASCIA_ATTR_KEY,
-      name: "Fascia",
-      type: "select",
-      position: 102,
-      options: ["alto", "medio", "basso", "escluso"],
-    },
     { key: AI_EXCLUDE_ATTR_KEY, name: "Escludi da pipeline", type: "boolean", position: 103 },
     { key: AI_EXCLUDE_REASON_ATTR_KEY, name: "Motivo esclusione", type: "text", position: 104 },
     { key: AI_INCLUDE_REASON_ATTR_KEY, name: "Motivo pipeline", type: "text", position: 105 },
@@ -391,11 +370,6 @@ export async function runAiAnalysisForPlace(
       update: { value: result.punteggio },
     }),
     db.placeCustomValue.upsert({
-      where: { listAttributeId_placeId: { listAttributeId: attrs[AI_FASCIA_ATTR_KEY], placeId: place.id } },
-      create: { listAttributeId: attrs[AI_FASCIA_ATTR_KEY], placeId: place.id, value: result.fascia },
-      update: { value: result.fascia },
-    }),
-    db.placeCustomValue.upsert({
       where: { listAttributeId_placeId: { listAttributeId: attrs[AI_EXCLUDE_ATTR_KEY], placeId: place.id } },
       create: { listAttributeId: attrs[AI_EXCLUDE_ATTR_KEY], placeId: place.id, value: result.escludiDaPipeline },
       update: { value: result.escludiDaPipeline },
@@ -435,7 +409,7 @@ export async function runAiAnalysisForPlace(
   await log(
     "info",
     "ai_analysis",
-    `Analisi AI completata: punteggio ${result.punteggio}/100 (${result.fascia})${result.escludiDaPipeline ? " — esclusa dalla pipeline" : ""}`,
+    `Analisi AI completata: punteggio ${result.punteggio}/100${result.escludiDaPipeline ? " — esclusa dalla pipeline" : ""}`,
     { searchId: params.searchId, placeId: place.id, costUsd: outcome.costUsd, payload: result.diagnostica },
   );
   return { success: true, excludeFromPipeline: result.escludiDaPipeline, excludeReason: result.motivoEsclusione ?? undefined };

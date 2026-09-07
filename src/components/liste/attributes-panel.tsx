@@ -29,7 +29,6 @@ Valuta in particolare: [scrivi qui i tuoi criteri specifici, es. settore, zona, 
 
 Rispondi SOLO con un oggetto JSON valido con questi campi:
 - "punteggio": intero 0-100
-- "fascia": uno tra "alto", "medio", "basso", "escluso"
 - "escludi_da_pipeline": true/false
 - "motivo_esclusione": stringa o null (solo se escluso)
 - "motivo_pipeline": stringa o null (solo se NON escluso, perché merita di entrare in pipeline)
@@ -145,7 +144,7 @@ function DeliveryFilterSection({
     <div>
       <SectionCard
         title="Analisi AI del lead (OpenAI)"
-        description="Per ogni nuovo risultato crea 6 campi: Analisi, Punteggio (0-100), Fascia, Escludi da pipeline, Motivo esclusione, Motivo pipeline (richiede la chiave API in Impostazioni). Se l'AI segnala l'esclusione (catena, multinazionale, sito già ottimo, attività chiusa), il risultato non viene inviato al webhook — stesso meccanismo delle catene rilevate a testo sotto. Se l'analisi fallisce del tutto (es. errore OpenAI), il risultato NON viene inviato finché non la rilanci da Logs."
+        description="Per ogni nuovo risultato crea 6 campi: Analisi, Punteggio contattabilità (0-100, ordinabile in tabella — la priorità di contatto è il punteggio stesso), Escludi da pipeline, Motivo esclusione, Motivo pipeline, Sito online dal (richiede la chiave API in Impostazioni). Se l'AI segnala l'esclusione (catena, multinazionale, sito già ottimo, attività chiusa), il risultato non viene inviato al webhook — stesso meccanismo delle catene rilevate a testo sotto. Se l'analisi fallisce del tutto (es. errore OpenAI), il risultato NON viene inviato finché non la rilanci da Logs."
       >
         <label className="mb-3 flex items-center gap-2 text-[13px]">
           <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} />
@@ -159,8 +158,7 @@ function DeliveryFilterSection({
             <div className="mb-2 text-[11px] text-muted-soft">
               Se compilato, <strong>sostituisce integralmente</strong> le istruzioni di default —
               devi includere tu la richiesta di rispondere in JSON con almeno i campi{" "}
-              <code>punteggio</code> (0-100), <code>fascia</code>{" "}
-              (alto/medio/basso/escluso), <code>escludi_da_pipeline</code> (booleano) e{" "}
+              <code>punteggio</code> (0-100), <code>escludi_da_pipeline</code> (booleano) e{" "}
               <code>descrizione</code>: se ne ometti anche solo uno l&apos;analisi fallirà, con
               l&apos;errore visibile nei Logs. I dati dell&apos;attività (nome, sito, rating, segnali
               tecnici reali del sito, testo estratto dalla pagina) vengono allegati automaticamente
