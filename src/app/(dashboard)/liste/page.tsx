@@ -28,6 +28,7 @@ interface ListDetail {
   excludeChainsThreshold: number | null;
   aiAnalysisEnabled: boolean;
   aiPromptMd: string | null;
+  aiVisionEnabled: boolean;
   outboundWebhookUrl: string | null;
   hasOutboundWebhookSecret: boolean;
   outboundFields: string[] | null;
@@ -106,6 +107,7 @@ export default function ListePage() {
       excludeChainsThreshold: detailData.list.excludeChainsThreshold ?? null,
       aiAnalysisEnabled: !!detailData.list.aiAnalysisEnabled,
       aiPromptMd: detailData.list.aiPromptMd ?? null,
+      aiVisionEnabled: !!detailData.list.aiVisionEnabled,
       outboundWebhookUrl: detailData.list.outboundWebhookUrl ?? null,
       hasOutboundWebhookSecret: !!detailData.list.hasOutboundWebhookSecret,
       outboundFields: detailData.list.outboundFields ?? null,
@@ -279,6 +281,7 @@ export default function ListePage() {
             excludeChainsThreshold={detail.excludeChainsThreshold}
             aiAnalysisEnabled={detail.aiAnalysisEnabled}
             aiPromptMd={detail.aiPromptMd}
+            aiVisionEnabled={detail.aiVisionEnabled}
             outboundWebhookUrl={detail.outboundWebhookUrl}
             hasOutboundWebhookSecret={detail.hasOutboundWebhookSecret}
             outboundFields={detail.outboundFields}

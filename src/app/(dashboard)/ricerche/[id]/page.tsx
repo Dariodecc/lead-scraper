@@ -363,7 +363,7 @@ export default function SearchDetailPage() {
                   disabled={status === "draft" && !draft.listId}
                   className="h-10 flex-1 rounded-md border border-border bg-background text-sm font-semibold disabled:opacity-40"
                 >
-                  {status === "active" ? "Pausa" : "Attiva"}
+                  {status === "active" ? "Pausa" : draft.frequency === "once" ? "Esegui" : "Attiva"}
                 </button>
               </>
             )}

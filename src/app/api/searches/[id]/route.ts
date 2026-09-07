@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { computeNextRunAt } from "@/lib/scheduling";
+import { enqueueSearchRun } from "@/lib/queue";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -90,6 +91,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   const search = await db.search.update({ where: { id }, data });
+
+  // "once" non ha una prossima esecuzione ricorrente (nextRunAt resta sempre null, §scheduling) —
+  // lo scheduler basato su nextRunAt non la farebbe mai partire da sola. Attivare una ricerca
+  // "una tantum" deve avviare subito una scansione reale, come un "esegui adesso" al click.
+  if (body.status === "active" && search.frequency === "once" && existing.status !== "active") {
+    const run = await db.searchRun.create({
+      data: { searchId: search.id, isTest: false, status: "running" },
+    });
+    await enqueueSearchRun(run.id);
+  }
+
   return NextResponse.json({ search });
 }
 

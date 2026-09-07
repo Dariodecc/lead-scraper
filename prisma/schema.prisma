@@ -110,6 +110,10 @@ model List {
   // integralmente le istruzioni di valutazione di default (non si somma). Il blocco dati
   // dell'attività (nome, sito, rating, testo pagina) viene comunque allegato sotto in automatico.
   aiPromptMd String? @map("ai_prompt_md")
+  // Opt-in, spento di default: allega uno screenshot del sito (gpt-4o-mini vision) all'analisi —
+  // costo per lead più alto (i token immagine si aggiungono al testo), l'AI può davvero vedere il
+  // design invece di dedurlo dal solo testo estratto. Vedi worker/src/screenshot.ts.
+  aiVisionEnabled Boolean @default(false) @map("ai_vision_enabled")
 
   // Webhook in uscita — SOLO a livello di Lista (non Impostazioni, non per-ricerca).
   outboundWebhookUrl             String? @map("outbound_webhook_url")

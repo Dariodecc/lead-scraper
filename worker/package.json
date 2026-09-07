@@ -13,6 +13,7 @@
     "ioredis": "^5",
     "luxon": "^3",
     "playwright": "^1.48.0",
+    "sharp": "^0.33.5",
     "zod": "^3"
   },
   "devDependencies": {

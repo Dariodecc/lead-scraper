@@ -226,7 +226,9 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
         costUsd: placeDetailsCost,
       });
 
-      const websiteCheck = details.websiteUrl ? await checkWebsiteStatus(details.websiteUrl) : null;
+      const websiteCheck = details.websiteUrl
+        ? await checkWebsiteStatus(details.websiteUrl, list.aiAnalysisEnabled && list.aiVisionEnabled)
+        : null;
       const websiteStatus = details.websiteUrl ? (websiteCheck?.status ?? "outdated") : "none";
       const firstSeenAt = new Date();
       const { bucket, confidence } = estimateOpening({

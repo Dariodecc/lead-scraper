@@ -35,6 +35,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   if (typeof body.aiAnalysisEnabled === "boolean") data.aiAnalysisEnabled = body.aiAnalysisEnabled;
   if (body.aiPromptMd !== undefined) data.aiPromptMd = body.aiPromptMd || null;
+  if (typeof body.aiVisionEnabled === "boolean") data.aiVisionEnabled = body.aiVisionEnabled;
 
   // Webhook in uscita — solo a livello di Lista.
   if (body.outboundWebhookUrl !== undefined) data.outboundWebhookUrl = body.outboundWebhookUrl || null;

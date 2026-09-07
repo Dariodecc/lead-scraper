@@ -33,7 +33,9 @@ export async function processWebhookDelivery(job: Job<WebhookDeliveryJobData>) {
       }),
     ]);
     if (!analysisValue || !scoreValue) {
-      const websiteCheck = place.websiteUrl ? await checkWebsiteStatus(place.websiteUrl) : null;
+      const websiteCheck = place.websiteUrl
+        ? await checkWebsiteStatus(place.websiteUrl, list.aiVisionEnabled)
+        : null;
       const aiResult = await runAiAnalysisForPlace(db, place, list, { websiteCheck });
       if (!aiResult.success) {
         await db.place.update({ where: { id: place.id }, data: { deliveryStatus: "failed" } });

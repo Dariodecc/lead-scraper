@@ -1,4 +1,5 @@
 import { chromium, type Browser } from "playwright";
+import { resizeScreenshotForVision, SCREENSHOT_MAX_WIDTH } from "./screenshot";
 
 // Verifica stato del sito web dichiarato (§4: "verifica presenza e stato del sito web").
 // Euristica semplice e dichiarata come tale: un sito che non carica o non ha una meta viewport
@@ -49,6 +50,10 @@ export interface WebsiteCheckResult {
   isHttps: boolean | null;
   finalUrl: string | null; // dopo eventuali redirect
   redirectedToDifferentDomain: boolean | null; // es. dominio scaduto parcheggiato altrove
+  // Screenshot dell'intera pagina (base64 JPEG, ridimensionato — vedi screenshot.ts), presente
+  // solo se richiesto esplicitamente (analisi AI con vision attiva sulla lista) e solo se la
+  // cattura riesce. UNA sola immagine per pagina, non una per sezione/scroll.
+  screenshotBase64: string | null;
 }
 
 const MAX_PAGE_TEXT_CHARS = 4000;
@@ -62,7 +67,10 @@ function sameDomain(a: string, b: string): boolean {
   }
 }
 
-export async function checkWebsiteStatus(url: string): Promise<WebsiteCheckResult> {
+export async function checkWebsiteStatus(
+  url: string,
+  captureScreenshot = false,
+): Promise<WebsiteCheckResult> {
   const failed: WebsiteCheckResult = {
     status: "outdated",
     pageText: null,
@@ -70,6 +78,7 @@ export async function checkWebsiteStatus(url: string): Promise<WebsiteCheckResul
     isHttps: null,
     finalUrl: null,
     redirectedToDifferentDomain: null,
+    screenshotBase64: null,
   };
 
   let browser: Browser;
@@ -80,7 +89,9 @@ export async function checkWebsiteStatus(url: string): Promise<WebsiteCheckResul
     return failed;
   }
 
-  const page = await browser.newPage();
+  // Viewport stretto: lo screenshot fullPage eredita questa larghezza, così la cattura resta
+  // già vicina ai bound di screenshot.ts prima ancora del ridimensionamento.
+  const page = await browser.newPage({ viewport: { width: SCREENSHOT_MAX_WIDTH, height: 800 } });
   try {
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
     const finalUrl = page.url();
@@ -98,6 +109,18 @@ export async function checkWebsiteStatus(url: string): Promise<WebsiteCheckResul
       .then((t) => t.replace(/\s+/g, " ").trim().slice(0, MAX_PAGE_TEXT_CHARS))
       .catch(() => null);
 
+    // UN solo screenshot dell'intera pagina (non uno per sezione/scroll) — il costo lo si
+    // controlla ridimensionando l'immagine dopo, non facendone di più piccole a pezzi.
+    let screenshotBase64: string | null = null;
+    if (captureScreenshot) {
+      try {
+        const buffer = await page.screenshot({ fullPage: true, type: "png", timeout: 15000 });
+        screenshotBase64 = await resizeScreenshotForVision(buffer);
+      } catch (err) {
+        console.error(`checkWebsiteStatus: screenshot fallito per ${url}:`, err);
+      }
+    }
+
     return {
       status: hasViewportMeta > 0 ? "ok" : "outdated",
       pageText,
@@ -105,6 +128,7 @@ export async function checkWebsiteStatus(url: string): Promise<WebsiteCheckResul
       isHttps,
       finalUrl,
       redirectedToDifferentDomain,
+      screenshotBase64,
     };
   } catch (err) {
     console.error(`checkWebsiteStatus: errore caricando ${url}:`, err);

@@ -127,7 +127,7 @@ export default function RicerchePage() {
                 className="rounded-md border border-border bg-background px-2 py-1.5 text-[11.5px] font-semibold whitespace-nowrap disabled:opacity-40"
                 onClick={(e) => toggleStatus(s, e)}
               >
-                {s.status === "active" ? "Pausa" : "Attiva"}
+                {s.status === "active" ? "Pausa" : s.frequency === "once" ? "Esegui" : "Attiva"}
               </button>
             </span>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { inputClass, selectClass } from "@/components/ui/field";
 import { FIXED_PLACE_FIELDS } from "@/lib/placeFields";
 import {
@@ -35,6 +35,16 @@ Rispondi SOLO con un oggetto JSON valido con questi campi:
 - "motivo_pipeline": stringa o null (solo se NON escluso, perché merita di entrare in pipeline)
 - "descrizione": 2-4 frasi in italiano`;
 
+// Bound reale di worker/src/screenshot.ts (screenshot ridimensionato a 1024x2000 prima di
+// inviarlo) — dopo il ridimensionamento interno di OpenAI (lato corto a 768px) l'immagine finale
+// è al più ~768x1500px, cioè 6 tile. Formula ufficiale gpt-4o-mini: 2833 token base + 5667 per
+// tile (developers.openai.com/api/docs/guides/images-vision) — non una stima a caso.
+const VISION_MAX_TOKENS = 2833 + 6 * 5667;
+
+function formatUsd(v: number): string {
+  return `$${v.toFixed(4)}`;
+}
+
 function SectionCard({
   title,
   description,
@@ -59,6 +69,7 @@ function DeliveryFilterSection({
   initialChainThreshold,
   initialAiEnabled,
   initialAiPromptMd,
+  initialAiVisionEnabled,
   initialWebhookUrl,
   initialHasWebhookSecret,
   initialOutboundFields,
@@ -70,6 +81,7 @@ function DeliveryFilterSection({
   initialChainThreshold: number | null;
   initialAiEnabled: boolean;
   initialAiPromptMd: string | null;
+  initialAiVisionEnabled: boolean;
   initialWebhookUrl: string | null;
   initialHasWebhookSecret: boolean;
   initialOutboundFields: string[] | null;
@@ -84,10 +96,21 @@ function DeliveryFilterSection({
   );
   const [aiEnabled, setAiEnabled] = useState(initialAiEnabled);
   const [aiPromptMd, setAiPromptMd] = useState(initialAiPromptMd ?? "");
+  const [aiVisionEnabled, setAiVisionEnabled] = useState(initialAiVisionEnabled);
+  const [openAiInputCostPer1M, setOpenAiInputCostPer1M] = useState(0.15);
   const [webhookUrl, setWebhookUrl] = useState(initialWebhookUrl ?? "");
   const [webhookSecret, setWebhookSecret] = useState("");
   const [outboundFields, setOutboundFields] = useState<string[]>(initialOutboundFields ?? []);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((d) => {
+        if (typeof d.openAiInputCostPer1M === "number") setOpenAiInputCostPer1M(d.openAiInputCostPer1M);
+      })
+      .catch(() => {});
+  }, []);
 
   function updateCondition(i: number, patch: Partial<DeliveryRuleCondition>) {
     setConditions((cs) => cs.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
@@ -106,6 +129,7 @@ function DeliveryFilterSection({
         excludeChainsThreshold: chainThreshold.trim() ? Number(chainThreshold) : null,
         aiAnalysisEnabled: aiEnabled,
         aiPromptMd: aiEnabled ? aiPromptMd : null,
+        aiVisionEnabled: aiEnabled && aiVisionEnabled,
         outboundWebhookUrl: webhookUrl,
         outboundWebhookSecret: webhookSecret || undefined,
         outboundFields: outboundFields.length > 0 ? outboundFields : null,
@@ -149,6 +173,25 @@ function DeliveryFilterSection({
               value={aiPromptMd}
               onChange={(e) => setAiPromptMd(e.target.value)}
             />
+
+            <label className="mt-4 flex items-start gap-2 text-[13px]">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={aiVisionEnabled}
+                onChange={(e) => setAiVisionEnabled(e.target.checked)}
+              />
+              <span>
+                Analizza anche uno screenshot del sito (visione gpt-4o-mini) — l&apos;AI vede
+                davvero il design invece di dedurlo dal solo testo estratto. Spento di default:
+                <strong> costo aggiuntivo reale fino a {formatUsd((VISION_MAX_TOKENS / 1_000_000) * openAiInputCostPer1M)} per lead con sito</strong>{" "}
+                (screenshot dell&apos;intera pagina in un&apos;unica immagine, ridimensionata prima
+                dell&apos;invio — non 3-4 scatti separati — ma le immagini su gpt-4o-mini costano
+                molto più del solo testo: {VISION_MAX_TOKENS.toLocaleString("it-IT")} token contro
+                le poche centinaia di un&apos;analisi testuale. Calcolato dal tasso OpenAI impostato
+                in Impostazioni.)
+              </span>
+            </label>
           </div>
         )}
       </SectionCard>
@@ -306,6 +349,7 @@ export function AttributesPanel({
   excludeChainsThreshold,
   aiAnalysisEnabled,
   aiPromptMd,
+  aiVisionEnabled,
   outboundWebhookUrl,
   hasOutboundWebhookSecret,
   outboundFields,
@@ -318,6 +362,7 @@ export function AttributesPanel({
   excludeChainsThreshold: number | null;
   aiAnalysisEnabled: boolean;
   aiPromptMd: string | null;
+  aiVisionEnabled: boolean;
   outboundWebhookUrl: string | null;
   hasOutboundWebhookSecret: boolean;
   outboundFields: string[] | null;
@@ -443,6 +488,7 @@ export function AttributesPanel({
         initialChainThreshold={excludeChainsThreshold}
         initialAiEnabled={aiAnalysisEnabled}
         initialAiPromptMd={aiPromptMd}
+        initialAiVisionEnabled={aiVisionEnabled}
         initialWebhookUrl={outboundWebhookUrl}
         initialHasWebhookSecret={hasOutboundWebhookSecret}
         initialOutboundFields={outboundFields}

@@ -129,6 +129,7 @@ async function callOpenAi(params: {
   websiteCheck: WebsiteCheckResult | null;
   firstSeenYear: number | null;
   customPromptMd: string | null;
+  visionEnabled: boolean;
 }): Promise<{ ok: true; result: AiAnalysisResult; costUsd: number } | { ok: false; error: string }> {
   let apiKey: string;
   try {
@@ -158,8 +159,22 @@ Rating: ${params.rating ?? "n/d"} (${params.reviewCount ?? 0} recensioni)
 Fascia di prezzo rilevata: ${params.priceLevel ?? "n/d"}
 Stato attività: ${params.businessStatus ?? "n/d"}
 Apertura stimata dell'attività: ${params.estimatedOpeningWindow} (confidenza: ${params.estimationConfidence})
-${wc?.pageText ? `Testo estratto dal sito (troncato):\n"""${wc.pageText}"""` : "Nessun testo disponibile dal sito."}`;
+${wc?.pageText ? `Testo estratto dal sito (troncato):\n"""${wc.pageText}"""` : "Nessun testo disponibile dal sito."}
+${params.visionEnabled && wc?.screenshotBase64 ? "In allegato a questo messaggio trovi anche uno screenshot reale dell'intera pagina — usalo per giudicare il design/aspetto visivo davvero, non dedurlo dal solo testo sopra." : ""}`;
   const prompt = `${instructions}\n\n${dataBlock}`;
+
+  // Multimodale SOLO se la vision è attiva per la lista e lo screenshot è disponibile — altrimenti
+  // resta il solo testo (nessun costo immagine se non richiesto esplicitamente, §opt-in).
+  const messageContent =
+    params.visionEnabled && wc?.screenshotBase64
+      ? [
+          { type: "text" as const, text: prompt },
+          {
+            type: "image_url" as const,
+            image_url: { url: `data:image/jpeg;base64,${wc.screenshotBase64}`, detail: "high" as const },
+          },
+        ]
+      : prompt;
 
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -170,7 +185,7 @@ ${wc?.pageText ? `Testo estratto dal sito (troncato):\n"""${wc.pageText}"""` : "
       },
       body: JSON.stringify({
         model: MODEL,
-        messages: [{ role: "user", content: prompt }],
+        messages: [{ role: "user", content: messageContent }],
         response_format: { type: "json_object" },
         temperature: 0.3,
         max_tokens: 600,
@@ -348,6 +363,7 @@ export async function runAiAnalysisForPlace(
     websiteCheck: params.websiteCheck,
     firstSeenYear,
     customPromptMd: list.aiPromptMd,
+    visionEnabled: list.aiVisionEnabled,
   });
 
   if (!outcome.ok) {
