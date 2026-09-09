@@ -219,7 +219,20 @@ export default function SearchDetailPage() {
           <div className="mb-3.5 text-[13px] font-semibold">Dati</div>
 
           <Field label="Zona (Google Places)">
-            <AreaAutocomplete value={draft.area} onChange={(area) => setDraft((d) => ({ ...d, area }))} />
+            <AreaAutocomplete
+              value={draft.area}
+              onChange={(area) =>
+                setDraft((d) => ({
+                  ...d,
+                  area,
+                  // Precompila il raggio per coprire l'intero comune selezionato (dal bounding
+                  // box che Google restituisce) — resta comunque modificabile a mano sotto.
+                  radiusKm: area.suggestedRadiusM
+                    ? Math.round(area.suggestedRadiusM / 1000)
+                    : d.radiusKm,
+                }))
+              }
+            />
           </Field>
 
           <Field label="Raggio di copertura (km)">
@@ -232,8 +245,10 @@ export default function SearchDetailPage() {
               onChange={(e) => setDraft((d) => ({ ...d, radiusKm: Number(e.target.value) }))}
             />
             <div className="mt-1.5 text-xs text-muted-soft">
-              Google restituisce al massimo 20 risultati a chiamata: l&apos;area viene coperta con
-              più chiamate (a griglia, con suddivisione automatica nelle zone dense).
+              Precompilato automaticamente per coprire l&apos;intero comune scelto sopra —
+              modificalo solo se vuoi un&apos;area più piccola o più ampia. Google restituisce al
+              massimo 20 risultati a chiamata: l&apos;area viene coperta con più chiamate (a
+              griglia, con suddivisione automatica nelle zone dense).
             </div>
           </Field>
 

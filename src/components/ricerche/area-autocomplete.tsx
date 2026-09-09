@@ -8,6 +8,7 @@ export interface AreaValue {
   label: string;
   lat: number;
   lng: number;
+  suggestedRadiusM?: number | null;
 }
 
 export function AreaAutocomplete({
