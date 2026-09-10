@@ -71,6 +71,9 @@ interface AiAnalysisResult {
   motivoPipeline: string | null;
   descrizione: string;
   statoSito: StatoSito | null;
+  // true quando l'AI aveva proposto l'esclusione per "attività non operativa" ma il campo
+  // businessStatus reale di Google la contraddice — l'esclusione è stata annullata (§callOpenAi).
+  esclusioneContraddettaDaGoogle: boolean;
   diagnostica: unknown; // analisi_sito/segnali_dimensione/segnali_vitalita/componenti/motivazione — solo per i Logs, non colonne di lista
 }
 
@@ -89,7 +92,7 @@ TARGET PERFETTO (punteggio alto): micro imprese e PMI locali (negozi, artigiani,
 DA ESCLUDERE (punteggio basso/nullo, priorità sul resto):
 - Catene, franchising in rete nazionale/internazionale, multinazionali: chi risponde al telefono di un punto vendita di un grande brand non decide nulla su un sito web. Riconoscile da: nome di brand noto, sito con selettore paese/lingua o "trova il punto vendita", decine/centinaia di sedi con lo stesso nome, categoria tipicamente a catena (fast food, banche, assicurazioni con agenzie, grande distribuzione, telco, noleggio auto internazionale) salvo indizi contrari (franchising indipendente a gestione locale autonoma — valuta caso per caso).
 - Sito già performante (moderno, responsive, veloce, aggiornato, con funzionalità utili al settore): bassissima probabilità che accettino di rifare tutto.
-- Attività non operativa (chiusa temporaneamente o definitivamente): non ha senso investire tempo commerciale.
+- Attività non operativa (chiusa temporaneamente o definitivamente): non ha senso investire tempo commerciale. Giudicalo ESCLUSIVAMENTE dal campo "Stato attività" fornito da Google Places. Un sito irraggiungibile, rotto o assente NON è prova che l'attività abbia chiuso — è anzi il caso di opportunità più tipico (attività viva ma con presenza web abbandonata): non dedurre mai "non operativa" dalla sola irraggiungibilità del sito.
 
 DATI CHE RICEVI: dati Google Places dell'attività (nome, indirizzo, categoria, rating, numero recensioni, fascia prezzo, stato attività, stima apertura con relativa confidenza) — tutti possono mancare, un dato mancante è un segnale debole, non un errore. rating/review_count/price_level sono proxy di traffico/vitalità, non misure di dimensione aziendale. Non interpretare mai la stima di apertura senza guardare anche la sua confidenza insieme.
 
@@ -248,22 +251,50 @@ ${params.visionEnabled && wc?.screenshotBase64 ? "In allegato a questo messaggio
           ),
         )
       : Math.max(0, Math.min(100, Math.round(parsed.punteggio)));
+    // Il modello a volte deduce "attività non operativa" dal solo sito irraggiungibile, pur
+    // avendo ricevuto lo stato attività reale di Google (osservato dal vivo: Technik Asfalti,
+    // sito con errore HTTP 500, business_status "operational" — esclusa comunque perché "il sito
+    // non risponde, quindi l'attività potrebbe non essere operativa"). Un sito rotto è un segnale
+    // sul SITO, non sull'attività: se l'unico motivo dell'esclusione è la chiusura (non catena, non
+    // sito performante) e Google la contraddice esplicitamente, annulliamo l'esclusione invece di
+    // fidarci della deduzione del modello — stesso principio già applicato all'aritmetica sopra.
+    const segnaliVitalitaStato = (parsed.segnali_vitalita as { stato?: string } | undefined)?.stato;
+    const segnaliDimensioneTipo = (parsed.segnali_dimensione as { tipo_attivita?: string } | undefined)?.tipo_attivita;
+    const esclusioneSoloPerChiusuraPresunta =
+      parsed.escludi_da_pipeline === true &&
+      segnaliVitalitaStato === "non_operativa" &&
+      statoSito !== "performante" &&
+      segnaliDimensioneTipo !== "catena_franchising" &&
+      segnaliDimensioneTipo !== "multinazionale";
+    const chiusuraContraddettaDaGoogle =
+      esclusioneSoloPerChiusuraPresunta && params.businessStatus === "operational";
+
+    const escludiDaPipelineCorretto = chiusuraContraddettaDaGoogle ? false : parsed.escludi_da_pipeline;
     // L'esclusione è una regola hard che sovrascrive tutto (§rubrica: "punteggio ≤10") — il
     // modello a volte la applica solo al flag dimenticando di abbassare anche i componenti
     // (osservato dal vivo: escludi_da_pipeline=true ma componenti sommati a 44). La forziamo qui,
     // non ci si può fidare che il modello tenga i due allineati da solo.
-    const punteggioCorretto = parsed.escludi_da_pipeline ? Math.min(punteggioSommato, 10) : punteggioSommato;
+    const punteggioCorretto = escludiDaPipelineCorretto ? Math.min(punteggioSommato, 10) : punteggioSommato;
 
     return {
       ok: true,
       costUsd,
       result: {
         punteggio: punteggioCorretto,
-        escludiDaPipeline: parsed.escludi_da_pipeline,
-        motivoEsclusione: typeof parsed.motivo_esclusione === "string" ? parsed.motivo_esclusione : null,
-        motivoPipeline: typeof parsed.motivo_pipeline === "string" ? parsed.motivo_pipeline : null,
+        escludiDaPipeline: escludiDaPipelineCorretto,
+        motivoEsclusione: chiusuraContraddettaDaGoogle
+          ? null
+          : typeof parsed.motivo_esclusione === "string"
+            ? parsed.motivo_esclusione
+            : null,
+        motivoPipeline: chiusuraContraddettaDaGoogle
+          ? "Il sito non è raggiungibile ma Google Places segnala l'attività come operativa — inclusa in pipeline nonostante l'esclusione proposta dall'AI (sito irraggiungibile ≠ attività chiusa)."
+          : typeof parsed.motivo_pipeline === "string"
+            ? parsed.motivo_pipeline
+            : null,
         descrizione: parsed.descrizione.slice(0, 800),
         statoSito,
+        esclusioneContraddettaDaGoogle: chiusuraContraddettaDaGoogle,
         diagnostica: {
           analisi_sito: parsed.analisi_sito,
           segnali_dimensione: parsed.segnali_dimensione,
@@ -405,6 +436,15 @@ export async function runAiAnalysisForPlace(
       ? [db.place.update({ where: { id: place.id }, data: { websiteStatus: websiteStatusOverride } })]
       : []),
   ]);
+
+  if (result.esclusioneContraddettaDaGoogle) {
+    await log(
+      "warning",
+      "ai_analysis",
+      "Esclusione proposta dall'AI per \"attività non operativa\" annullata: Google Places segnala l'attività come operativa (sito irraggiungibile ≠ attività chiusa)",
+      { searchId: params.searchId, placeId: place.id },
+    );
+  }
 
   await log(
     "info",
