@@ -54,6 +54,15 @@ export default function RicerchePage() {
     load();
   }
 
+  // Le ricerche "una tantum" restano "attive" per sempre dopo la prima esecuzione (nessuna
+  // ricorrenza da riprendere con Attiva/Pausa) — per rilanciarle serve un'azione diretta, non il
+  // toggle di stato.
+  async function runOnce(s: SearchRow, e: React.MouseEvent) {
+    e.stopPropagation();
+    await fetch(`/api/searches/${s.id}/run`, { method: "POST" });
+    load();
+  }
+
   return (
     <div className="px-12 pb-12 pt-10">
       <div className="mb-8 flex items-start justify-between">
@@ -122,13 +131,23 @@ export default function RicerchePage() {
               >
                 TEST
               </button>
-              <button
-                disabled={s.status === "draft" && !s.listId}
-                className="rounded-md border border-border bg-background px-2 py-1.5 text-[11.5px] font-semibold whitespace-nowrap disabled:opacity-40"
-                onClick={(e) => toggleStatus(s, e)}
-              >
-                {s.status === "active" ? "Pausa" : s.frequency === "once" ? "Esegui" : "Attiva"}
-              </button>
+              {s.frequency === "once" ? (
+                <button
+                  disabled={!s.listId}
+                  className="rounded-md border border-border bg-background px-2 py-1.5 text-[11.5px] font-semibold whitespace-nowrap disabled:opacity-40"
+                  onClick={(e) => runOnce(s, e)}
+                >
+                  {s.status === "active" ? "Esegui di nuovo" : "Esegui"}
+                </button>
+              ) : (
+                <button
+                  disabled={s.status === "draft" && !s.listId}
+                  className="rounded-md border border-border bg-background px-2 py-1.5 text-[11.5px] font-semibold whitespace-nowrap disabled:opacity-40"
+                  onClick={(e) => toggleStatus(s, e)}
+                >
+                  {s.status === "active" ? "Pausa" : "Attiva"}
+                </button>
+              )}
             </span>
           </div>
         ))}

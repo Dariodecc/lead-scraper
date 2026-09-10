@@ -190,6 +190,22 @@ export default function SearchDetailPage() {
     setStatus(nextStatus);
   }
 
+  // Le ricerche "una tantum" restano "attive" per sempre dopo la prima esecuzione — per
+  // rilanciarle serve un'azione diretta, non il toggle Attiva/Pausa (che non le farebbe mai
+  // ripartire da sole, §scheduling).
+  async function handleRunOnce() {
+    if (isNew) return;
+    const res = await fetch(`/api/searches/${params.id}/run`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error ?? "Errore");
+      return;
+    }
+    setStatus("active");
+    setMessage("Ricerca accodata — controlla lo storico esecuzioni tra qualche secondo.");
+    load();
+  }
+
   if (!loaded) return <div className="px-12 pb-12 pt-10 text-sm text-muted-foreground">Caricamento…</div>;
 
   return (
@@ -372,14 +388,25 @@ export default function SearchDetailPage() {
                 >
                   {testing ? "In corso…" : "Esegui TEST"}
                 </button>
-                <button
-                  type="button"
-                  onClick={handleToggleStatus}
-                  disabled={status === "draft" && !draft.listId}
-                  className="h-10 flex-1 rounded-md border border-border bg-background text-sm font-semibold disabled:opacity-40"
-                >
-                  {status === "active" ? "Pausa" : draft.frequency === "once" ? "Esegui" : "Attiva"}
-                </button>
+                {draft.frequency === "once" ? (
+                  <button
+                    type="button"
+                    onClick={handleRunOnce}
+                    disabled={!draft.listId}
+                    className="h-10 flex-1 rounded-md border border-border bg-background text-sm font-semibold disabled:opacity-40"
+                  >
+                    {status === "active" ? "Esegui di nuovo" : "Esegui"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleToggleStatus}
+                    disabled={status === "draft" && !draft.listId}
+                    className="h-10 flex-1 rounded-md border border-border bg-background text-sm font-semibold disabled:opacity-40"
+                  >
+                    {status === "active" ? "Pausa" : "Attiva"}
+                  </button>
+                )}
               </>
             )}
           </div>
