@@ -22,7 +22,15 @@ interface SearchRunJobData {
 // dell'API, non un nostro difetto — vedi grid.ts). Sotto questa soglia una singola chiamata
 // basta; sopra, si copre l'area con una griglia di celle da CELL_RADIUS_M.
 const CELL_RADIUS_M = 3000;
-const MAX_GRID_CELLS = 30;
+// Un cerchio di 50km (il raggio massimo concesso in UI, §area-autocomplete — copre anche i
+// comuni più estesi come Roma) servono ~385 celle da 3km per essere coperto senza buchi
+// (verificato con grid.ts::generateGrid). 30 era troppo basso: da quando il raggio viene
+// auto-suggerito per coprire l'intero comune selezionato (non più scelto a mano, quasi sempre
+// piccolo), troncava silenziosamente la fascia periferica di qualunque città medio-grande —
+// proprio dove si concentrano spesso le attività industriali/artigianali. Margine di sicurezza
+// oltre i 385 calcolati, il costo reale resta comunque nullo/trascurabile ben sotto la soglia
+// gratuita mensile di Google (§costs.ts).
+const MAX_GRID_CELLS = 400;
 // Se una cella (o una zona senza griglia) tocca esattamente il tetto di 20, è quasi certamente
 // troncata (successo confermato su una vera zona satura, es. centro Milano) — si suddivide in 4
 // sotto-celle a raggio dimezzato e si ripete, fino a questa profondità massima.
