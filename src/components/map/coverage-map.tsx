@@ -37,6 +37,7 @@ export function CoverageMap({
   const mapRef = useRef<LeafletNS.Map | null>(null);
   const layerGroupRef = useRef<LeafletNS.LayerGroup | null>(null);
   const leafletRef = useRef<typeof LeafletNS | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const circlesRef = useRef(circles);
   circlesRef.current = circles;
 
@@ -55,11 +56,27 @@ export function CoverageMap({
       }).addTo(map);
       layerGroupRef.current = L.layerGroup().addTo(map);
       mapRef.current = map;
-      drawCircles();
+
+      // Il container può non avere ancora le dimensioni finali nel momento esatto in cui Leaflet
+      // le legge (soprattutto dietro un dynamic import ssr:false) — senza invalidateSize()
+      // fitBounds calcola lo zoom su una viewport 0x0 e finisce sullo zoom minimo (mondo intero).
+      const resizeObserver = new ResizeObserver(() => {
+        map.invalidateSize();
+      });
+      resizeObserver.observe(containerRef.current);
+      resizeObserverRef.current = resizeObserver;
+
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        map.invalidateSize();
+        drawCircles();
+      });
     })();
 
     return () => {
       cancelled = true;
+      resizeObserverRef.current?.disconnect();
+      resizeObserverRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
       layerGroupRef.current = null;
@@ -71,6 +88,7 @@ export function CoverageMap({
     const map = mapRef.current;
     const group = layerGroupRef.current;
     if (!L || !map || !group) return;
+    map.invalidateSize();
     group.clearLayers();
 
     const current = circlesRef.current;

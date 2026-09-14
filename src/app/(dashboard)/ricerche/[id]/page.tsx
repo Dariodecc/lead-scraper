@@ -68,6 +68,15 @@ function formatUsd(v: number) {
   return `$${v.toFixed(4)}`;
 }
 
+interface OtherSearch {
+  id: string;
+  title: string;
+  areaLabel: string;
+  areaLat: string | number | null;
+  areaLng: string | number | null;
+  areaRadiusM: number;
+}
+
 export default function SearchDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -76,6 +85,7 @@ export default function SearchDetailPage() {
   const [draft, setDraft] = useState(emptyDraft());
   const [status, setStatus] = useState<"draft" | "active" | "paused">("draft");
   const [lists, setLists] = useState<ListSummary[]>([]);
+  const [otherSearches, setOtherSearches] = useState<OtherSearch[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [costSummary, setCostSummary] = useState<CostSummary | null>(null);
   const [saving, setSaving] = useState(false);
@@ -87,6 +97,16 @@ export default function SearchDetailPage() {
     const listsRes = await fetch("/api/lists");
     const listsData = await listsRes.json();
     setLists((listsData.lists ?? []).map((l: { id: string; name: string }) => ({ id: l.id, name: l.name })));
+
+    // Altre ricerche già impostate — mostrate come riferimento sulla mappa qui sotto, per avere
+    // un contesto di quanti km usano zone simili invece di indovinare da zero.
+    const searchesRes = await fetch("/api/searches");
+    const searchesData = await searchesRes.json();
+    setOtherSearches(
+      (searchesData.searches ?? []).filter(
+        (s: OtherSearch) => s.id !== params.id && s.areaLat != null && s.areaLng != null,
+      ),
+    );
 
     if (!isNew) {
       const res = await fetch(`/api/searches/${params.id}`);
@@ -278,20 +298,30 @@ export default function SearchDetailPage() {
             <Field label="Copertura sulla mappa">
               <CoverageMap
                 circles={[
+                  ...otherSearches.map((s) => ({
+                    id: s.id,
+                    lat: Number(s.areaLat),
+                    lng: Number(s.areaLng),
+                    radiusM: s.areaRadiusM,
+                    label: `${s.title || "Nuova ricerca"} — ${s.areaLabel} (${Math.round(s.areaRadiusM / 1000)} km)`,
+                    color: "#9ca3af",
+                    href: `/ricerche/${s.id}`,
+                  })),
                   {
                     id: "preview",
                     lat: draft.area.lat,
                     lng: draft.area.lng,
                     radiusM: draft.radiusKm * 1000,
-                    label: `${draft.area.label} — ${draft.radiusKm} km`,
+                    label: `${draft.area.label} — ${draft.radiusKm} km (questa ricerca)`,
                   },
                 ]}
-                height={260}
+                height={320}
               />
               <div className="mt-1.5 text-xs text-muted-soft">
-                Il cerchio è l&apos;area effettivamente scansionata, non il confine amministrativo
-                esatto del comune (Google non lo espone via API) — usalo per verificare a colpo
-                d&apos;occhio se il raggio ha senso e ritoccarlo se necessario.
+                In blu questa ricerca, in grigio le altre già impostate (per capire a colpo
+                d&apos;occhio quanti km usano zone simili — clicca per aprirle). Il cerchio è
+                l&apos;area effettivamente scansionata, non il confine amministrativo esatto del
+                comune (Google non lo espone via API).
               </div>
             </Field>
           )}
