@@ -2,9 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { Field, inputClass, selectClass } from "@/components/ui/field";
 import { AreaAutocomplete, type AreaValue } from "@/components/ricerche/area-autocomplete";
 import { PLACE_TYPES } from "@/lib/placeTypes";
+
+// Leaflet tocca `window` — niente SSR, si carica solo lato client dopo il mount.
+const CoverageMap = dynamic(() => import("@/components/map/coverage-map").then((m) => m.CoverageMap), {
+  ssr: false,
+});
 
 const WEEKDAYS = [
   { id: 1, label: "Lunedì" },
@@ -267,6 +273,28 @@ export default function SearchDetailPage() {
               griglia, con suddivisione automatica nelle zone dense).
             </div>
           </Field>
+
+          {draft.area && (
+            <Field label="Copertura sulla mappa">
+              <CoverageMap
+                circles={[
+                  {
+                    id: "preview",
+                    lat: draft.area.lat,
+                    lng: draft.area.lng,
+                    radiusM: draft.radiusKm * 1000,
+                    label: `${draft.area.label} — ${draft.radiusKm} km`,
+                  },
+                ]}
+                height={260}
+              />
+              <div className="mt-1.5 text-xs text-muted-soft">
+                Il cerchio è l&apos;area effettivamente scansionata, non il confine amministrativo
+                esatto del comune (Google non lo espone via API) — usalo per verificare a colpo
+                d&apos;occhio se il raggio ha senso e ritoccarlo se necessario.
+              </div>
+            </Field>
+          )}
 
           <Field label="Categoria commerciale (Place Type)">
             <select
