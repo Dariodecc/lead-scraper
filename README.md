@@ -27,6 +27,11 @@ Il worker usa `TWENTY_BASE_URL` e `TWENTY_API_KEY`. Impostare
 dai nuovi risultati. Lasciarla vuota per sospendere la consegna al CRM. Applicare
 lo schema Prisma prima di aggiornare i container web e worker.
 
+Impostare `TWENTY_WORKFLOW_URL` sull'URL del workflow Twenty e
+`TWENTY_WORKFLOW_PASSWORD` sulla password Basic Auth del proxy. Le liste che usano
+quell'URL come webhook inviano i lead verificati al workflow. Dalla scheda della
+lista basta configurare l'URL. Il worker aggiunge l'autenticazione al momento dell'invio.
+
 Per i lead **Da verificare**, aprire la scheda del risultato e usare il codice
 dell'operatore (`TWENTY_REVIEW_TOKEN` nel container web). Inserire il nome tratto
 da una fonte indipendente e il suo URL, quindi confermare. Se Twenty segnala più

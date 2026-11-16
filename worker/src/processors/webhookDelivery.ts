@@ -5,7 +5,7 @@ import { buildAttributes } from "../webhookPayload";
 import { makeLogger } from "../log";
 import { checkWebsiteStatus } from "../websiteCheck";
 import { runAiAnalysisForPlace, AI_ANALYSIS_ATTR_KEY, AI_SCORE_ATTR_KEY } from "../aiAnalysis";
-import { qualifiesForCrm, registerCrmDelivery } from "../crmDelivery";
+import { forwardsToCrm, qualifiesForCrm, registerCrmDelivery } from "../crmDelivery";
 import { evaluateDeliveryRules, type DeliveryRules } from "../deliveryRules";
 
 const db = new PrismaClient();
@@ -60,18 +60,22 @@ export async function processWebhookDelivery(job: Job<WebhookDeliveryJobData>) {
     }
   }
 
-  if (place.crmScreeningPending && qualifiesForCrm(place)) {
+  if (forwardsToCrm(list.outboundWebhookUrl)) {
     try {
-      const rules = list.deliveryRules as DeliveryRules | null;
-      if (evaluateDeliveryRules(place, rules).allowed) {
-        if (!websiteCheck && place.websiteUrl) websiteCheck = await checkWebsiteStatus(place.websiteUrl);
-        await registerCrmDelivery(db, place, websiteCheck);
-      } else {
-        await db.place.update({ where: { id: place.id }, data: { crmScreeningPending: false } });
+      if (place.crmScreeningPending && qualifiesForCrm(place)) {
+        const rules = list.deliveryRules as DeliveryRules | null;
+        if (evaluateDeliveryRules(place, rules).allowed) {
+          if (!websiteCheck && place.websiteUrl) websiteCheck = await checkWebsiteStatus(place.websiteUrl);
+          await registerCrmDelivery(db, place, websiteCheck);
+        } else {
+          await db.place.update({ where: { id: place.id }, data: { crmScreeningPending: false } });
+        }
       }
     } catch {
       await log("error", "system", "Registrazione della consegna CRM fallita.", { placeId: place.id });
+      throw new Error("Registrazione della consegna CRM fallita.");
     }
+    return;
   }
 
   const url = list.outboundWebhookUrl;

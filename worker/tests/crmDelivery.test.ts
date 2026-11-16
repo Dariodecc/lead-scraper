@@ -1,7 +1,7 @@
 import { deepEqual, equal } from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import type { PrismaClient } from "@prisma/client";
-import { deliverCrmRecord, qualifiesForCrm } from "../src/crmDelivery";
+import { deliverCrmRecord, forwardsToCrm, qualifiesForCrm } from "../src/crmDelivery";
 import { placeRecordId, TwentyClient, type Company, type CompanyEvidence } from "../src/twenty";
 
 const evidence: CompanyEvidence = {
@@ -16,6 +16,7 @@ const opportunityId = placeRecordId("opportunity", googlePlaceId);
 const companyId = placeRecordId("company", googlePlaceId);
 const otherCompanyId = "4bc24095-ddae-4598-bd57-0635bc5d41a9";
 const token = "claim";
+const webhook = { url: new URL("https://crm.example/webhooks/workflows/workspace/workflow"), password: "fixture" };
 
 function fixture(context: TestContext, candidates: Company[] = []) {
   const state: Parameters<typeof deliverCrmRecord>[1] = {
@@ -44,24 +45,33 @@ function fixture(context: TestContext, candidates: Company[] = []) {
   } as unknown as PrismaClient;
   const companies = new Map(candidates.map((company) => [company.id, company]));
   const opportunities = new Map<string, { id: string; companyId: string; name: string; stage: string }>();
-  const posts: string[] = [];
+  const posts: boolean[] = [];
   let failOpportunity = false;
   const missing = () => new Response(null, { status: 404 });
 
   context.mock.method(globalThis, "fetch", async (url: URL, options: RequestInit) => {
     const [, , object, recordId] = url.pathname.split("/");
     if (options.method === "POST") {
-      posts.push(object);
-      if (object === "companies") {
-        const body = JSON.parse(String(options.body));
-        companies.set(body.id, body);
-        return Response.json({ data: { createCompany: body } }, { status: 201 });
-      }
-      equal(object, "opportunities");
-      if (failOpportunity) return new Response(null, { status: 503 });
+      equal(url.href, webhook.url.href);
       const body = JSON.parse(String(options.body));
-      opportunities.set(body.id, body);
-      return Response.json({ data: { createOpportunity: body } }, { status: 201 });
+      equal(body.event, "lead.verified");
+      equal(body.name, evidence.name);
+      equal(body.phone, undefined);
+      equal(body.pointOfContactId, undefined);
+      equal(new Headers(options.headers).get("authorization"), "Basic " + Buffer.from("lead-scraper:fixture").toString("base64"));
+      posts.push(body.createCompany);
+      if (body.createCompany) {
+        companies.set(body.companyId, {
+          id: body.companyId, name: body.name,
+          domainName: { primaryLinkUrl: body.website },
+          address: { addressStreet1: body.street, addressCity: body.city },
+        });
+      }
+      if (failOpportunity) return new Response(null, { status: 503 });
+      opportunities.set(body.opportunityId, {
+        id: body.opportunityId, companyId: body.companyId, name: body.name, stage: "NEW",
+      });
+      return Response.json({ success: true, workflowRunId: "fixture" }, { status: 201 });
     }
     if (object === "companies" && !recordId) {
       return Response.json({ data: { companies: candidates }, pageInfo: { hasNextPage: false } });
@@ -76,7 +86,7 @@ function fixture(context: TestContext, candidates: Company[] = []) {
   });
   const deliver = () => {
     state.leaseToken = token;
-    return deliverCrmRecord(db, { ...state }, token, new TwentyClient(new URL("https://crm.example"), "fixture"));
+    return deliverCrmRecord(db, { ...state }, token, new TwentyClient(new URL("https://crm.example"), "fixture"), webhook);
   };
   return { state, deliver, companies, opportunities, posts, setFailure: (fail: boolean) => { failOpportunity = fail; } };
 }
@@ -86,10 +96,9 @@ test("crea azienda e opportunità senza referente e recupera una consegna ripetu
   await deliver();
   await deliver();
   equal(state.status, "delivered");
-  deepEqual(posts, ["companies", "opportunities"]);
+  deepEqual(posts, [true]);
   deepEqual(companies.get(companyId), {
-    id: companyId, name: evidence.name, source: "SCRAPER", relationshipType: "LEAD",
-    qualificationStatus: "DA_QUALIFICARE", domainName: { primaryLinkUrl: evidence.website },
+    id: companyId, name: evidence.name, domainName: { primaryLinkUrl: evidence.website },
     address: { addressStreet1: evidence.street, addressCity: evidence.city },
   });
   deepEqual(opportunities.get(opportunityId), { id: opportunityId, companyId, name: evidence.name, stage: "NEW" });
@@ -100,7 +109,7 @@ test("riutilizza l’azienda CRM con nome e indirizzo verificati", async (contex
   const { deliver, opportunities, posts } = fixture(context, [candidate]);
   await deliver();
   equal(opportunities.get(opportunityId)?.companyId, otherCompanyId);
-  deepEqual(posts, ["opportunities"]);
+  deepEqual(posts, [false]);
 });
 
 test("attende una scelta quando il CRM ha un omonimo da verificare", async (context) => {
@@ -124,7 +133,7 @@ test("recupera un errore dopo la creazione dell’azienda", async (context) => {
   setFailure(false);
   await deliver();
   equal(state.status, "delivered");
-  deepEqual(posts, ["companies", "opportunities", "opportunities"]);
+  deepEqual(posts, [true, false]);
 });
 
 test("attende la conferma del nome prima di effettuare chiamate al CRM", async (context) => {
@@ -143,4 +152,10 @@ test("esclude storico e anteprime dalla consegna", () => {
   equal(qualifiesForCrm({ previewOnly: false, firstSeenAt: new Date(cutoff.getTime() - 1) }, cutoff), false);
   equal(qualifiesForCrm({ previewOnly: true, firstSeenAt: cutoff }, cutoff), false);
   equal(qualifiesForCrm({ previewOnly: false, firstSeenAt: cutoff }, cutoff), true);
+});
+
+test("la lista deve puntare esattamente al webhook MDNT", () => {
+  equal(forwardsToCrm(null, webhook.url.href), false);
+  equal(forwardsToCrm("https://automation.example/webhook", webhook.url.href), false);
+  equal(forwardsToCrm(webhook.url.href, webhook.url.href), true);
 });

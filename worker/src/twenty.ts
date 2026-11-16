@@ -20,6 +20,11 @@ export interface Company {
   } | null;
 }
 
+export interface TwentyWebhook {
+  url: URL;
+  password: string;
+}
+
 interface Opportunity {
   id: string;
   companyId: string | null;
@@ -83,14 +88,9 @@ export function placeRecordId(type: "company" | "opportunity", placeId: string) 
 export class TwentyClient {
   constructor(private readonly baseUrl: URL, private readonly apiKey: string) {}
 
-  private async request(path: string, body?: object): Promise<TwentyResponse> {
+  private async request(path: string): Promise<TwentyResponse> {
     const response = await fetch(new URL(`/rest/${path}`, this.baseUrl), {
-      method: body ? "POST" : "GET",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
+      headers: { Authorization: `Bearer ${this.apiKey}` },
       redirect: "error",
       signal: AbortSignal.timeout(8000),
     });
@@ -136,42 +136,35 @@ export class TwentyClient {
     throw new TwentyError(422, "Troppe corrispondenze CRM per verificare l’azienda automaticamente.");
   }
 
-  private async create<T>(path: string, key: string, body: object, find: () => Promise<T | null>): Promise<T> {
-    try {
-      return (await this.request(path, body)).data[key] as T;
-    } catch (error) {
-      if (error instanceof TwentyError && (error.status === 400 || error.status === 409)) {
-        const record = await find();
-        if (record) return record;
-      }
-      throw error;
+  async triggerLeadWorkflow(
+    webhook: TwentyWebhook,
+    evidence: CompanyEvidence,
+    companyId: string,
+    opportunityId: string,
+    createCompany: boolean,
+  ) {
+    const auth = Buffer.from(`lead-scraper:${webhook.password}`).toString("base64");
+    const response = await fetch(webhook.url, {
+      method: "POST",
+      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event: "lead.verified",
+        companyId,
+        opportunityId,
+        createCompany,
+        name: evidence.name,
+        website: evidence.website ?? "",
+        street: evidence.street ?? "",
+        city: evidence.city ?? "",
+        postcode: evidence.postcode ?? "",
+      }),
+      redirect: "error",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!response.ok) throw new TwentyError(response.status, `Webhook MDNT: HTTP ${response.status}.`);
+    const result = await response.json() as { success?: boolean; workflowRunId?: string };
+    if (!result.success || !result.workflowRunId) {
+      throw new TwentyError(502, "Il webhook MDNT non ha confermato l’avvio del workflow.");
     }
-  }
-
-  createCompany(id: string, evidence: CompanyEvidence) {
-    return this.create<Company>("companies?fields=id,name", "createCompany", {
-      id,
-      name: evidence.name,
-      source: "SCRAPER",
-      relationshipType: "LEAD",
-      qualificationStatus: "DA_QUALIFICARE",
-      ...(evidence.website ? { domainName: { primaryLinkUrl: evidence.website } } : {}),
-      ...(evidence.street ? {
-        address: {
-          addressStreet1: evidence.street,
-          ...(evidence.city ? { addressCity: evidence.city } : {}),
-          ...(evidence.postcode ? { addressPostcode: evidence.postcode } : {}),
-        },
-      } : {}),
-    }, () => this.company(id));
-  }
-
-  createOpportunity(id: string, companyId: string, name: string) {
-    return this.create<Opportunity>("opportunities?fields=id,companyId&depth=0", "createOpportunity", {
-      id,
-      companyId,
-      name,
-      stage: "NEW",
-    }, () => this.opportunity(id));
   }
 }

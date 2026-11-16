@@ -58,6 +58,8 @@ services:
       TWENTY_BASE_URL: ${TWENTY_BASE_URL:-}
       TWENTY_API_KEY: ${TWENTY_API_KEY:-}
       TWENTY_SYNC_START_AT: ${TWENTY_SYNC_START_AT:-}
+      TWENTY_WORKFLOW_URL: ${TWENTY_WORKFLOW_URL:-}
+      TWENTY_WORKFLOW_PASSWORD: ${TWENTY_WORKFLOW_PASSWORD:-}
     depends_on:
       - postgres
       - redis

@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { Prisma, type Place, type PrismaClient } from "@prisma/client";
-import { normalizeName, placeRecordId, TwentyClient, TwentyError, verifiedCompany, type CompanyEvidence } from "./twenty";
+import {
+  normalizeName, placeRecordId, TwentyClient, TwentyError, verifiedCompany, type CompanyEvidence, type TwentyWebhook,
+} from "./twenty";
 import type { WebsiteCheckResult } from "./websiteCheck";
 
 const MAX_ATTEMPTS = 5;
@@ -8,30 +11,41 @@ const POLL_MS = 5000;
 const LEASE_MS = 180_000;
 
 function config() {
-  const { TWENTY_BASE_URL, TWENTY_API_KEY, TWENTY_SYNC_START_AT } = process.env;
+  const { TWENTY_BASE_URL, TWENTY_API_KEY, TWENTY_SYNC_START_AT, TWENTY_WORKFLOW_URL, TWENTY_WORKFLOW_PASSWORD } = process.env;
   if (!TWENTY_SYNC_START_AT) return null;
   const startAt = new Date(TWENTY_SYNC_START_AT);
-  if (!TWENTY_API_KEY || !TWENTY_BASE_URL || !Number.isFinite(startAt.getTime())) {
-    throw new Error("Configurazione Twenty incompleta: servono URL, chiave API e data di partenza ISO.");
+  if (!TWENTY_API_KEY || !TWENTY_BASE_URL || !TWENTY_WORKFLOW_URL || !TWENTY_WORKFLOW_PASSWORD
+    || !Number.isFinite(startAt.getTime())) {
+    throw new Error("Configurazione Twenty incompleta.");
   }
   const url = new URL(TWENTY_BASE_URL);
   if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/") {
     throw new Error("TWENTY_BASE_URL deve identificare un origin HTTPS.");
   }
-  return { startAt, client: new TwentyClient(url, TWENTY_API_KEY) };
+  const workflowUrl = new URL(TWENTY_WORKFLOW_URL);
+  if (workflowUrl.origin !== url.origin || workflowUrl.username || workflowUrl.password
+    || workflowUrl.search || workflowUrl.hash || !workflowUrl.pathname.startsWith("/webhooks/workflows/")) {
+    throw new Error("TWENTY_WORKFLOW_URL deve identificare un webhook sullo stesso origin di Twenty.");
+  }
+  const webhook = { url: workflowUrl, password: TWENTY_WORKFLOW_PASSWORD };
+  return { startAt, client: new TwentyClient(url, TWENTY_API_KEY), webhook };
 }
 
 const integration = (() => {
   try {
     return config();
   } catch {
-    console.error("Configurazione Twenty non valida. Controlla URL HTTPS, chiave API e data di partenza ISO.");
+    console.error("Configurazione Twenty non valida. Controlla API, credenziali webhook e data di partenza.");
     return null;
   }
 })();
 
 export function qualifiesForCrm(place: Pick<Place, "firstSeenAt" | "previewOnly">, startAt = integration?.startAt) {
   return !!startAt && !place.previewOnly && place.firstSeenAt >= startAt;
+}
+
+export function forwardsToCrm(destination: string | null, expected = integration?.webhook.url.href) {
+  return !!expected && destination === expected;
 }
 
 function websiteEvidence(place: Place, checked: WebsiteCheckResult | null): CompanyEvidence | undefined {
@@ -69,7 +83,9 @@ export async function registerCrmDelivery(db: PrismaClient, place: Place, checke
 
 type Delivery = Prisma.CrmDeliveryGetPayload<{ include: { place: { select: { placeId: true } } } }>;
 
-export async function deliverCrmRecord(db: PrismaClient, delivery: Delivery, token: string, twenty: TwentyClient) {
+export async function deliverCrmRecord(
+  db: PrismaClient, delivery: Delivery, token: string, twenty: TwentyClient, webhook: TwentyWebhook,
+) {
   const update = (data: Prisma.CrmDeliveryUpdateManyMutationInput) =>
     db.crmDelivery.updateMany({ where: { placeId: delivery.placeId, leaseToken: token }, data });
 
@@ -84,13 +100,14 @@ export async function deliverCrmRecord(db: PrismaClient, delivery: Delivery, tok
     const opportunityId = placeRecordId("opportunity", googlePlaceId);
     const existing = await twenty.opportunity(opportunityId);
     let companyId = existing?.companyId ?? delivery.companyId;
+    const newCompanyId = placeRecordId("company", googlePlaceId);
+    let createCompany = false;
 
     if (existing && !existing.companyId) {
       throw new TwentyError(422, "L’opportunità è già presente nel CRM ma è scollegata dall’azienda.");
     }
 
     if (!companyId) {
-      const newCompanyId = placeRecordId("company", googlePlaceId);
       let company = await twenty.company(newCompanyId);
       if (!company && !delivery.createCompany) {
         const candidates = await twenty.candidates(evidence);
@@ -111,14 +128,22 @@ export async function deliverCrmRecord(db: PrismaClient, delivery: Delivery, tok
           return;
         }
       }
-      company ??= await twenty.createCompany(newCompanyId, evidence);
-      companyId = company.id;
+      createCompany = !company;
+      companyId = company?.id ?? newCompanyId;
+    } else if (!existing && companyId === newCompanyId) {
+      createCompany = !(await twenty.company(newCompanyId));
     }
 
     if (!existing) {
       const saved = await update({ companyId, dueAt: new Date(Date.now() + LEASE_MS) });
       if (!saved.count) return;
-      const opportunity = await twenty.createOpportunity(opportunityId, companyId, evidence.name);
+      await twenty.triggerLeadWorkflow(webhook, evidence, companyId, opportunityId, createCompany);
+      let opportunity = await twenty.opportunity(opportunityId);
+      for (let second = 0; !opportunity && second < 8; second++) {
+        await delay(1000);
+        opportunity = await twenty.opportunity(opportunityId);
+      }
+      if (!opportunity) throw new TwentyError(503, "Il workflow MDNT non ha ancora creato l’opportunità.");
       if (opportunity.companyId !== companyId) {
         throw new TwentyError(422, "L’opportunità è collegata a un’altra azienda nel CRM.");
       }
@@ -146,14 +171,15 @@ export async function deliverCrmRecord(db: PrismaClient, delivery: Delivery, tok
 }
 
 export function startCrmDeliveryWorker(db: PrismaClient) {
-  const twenty = integration?.client;
-  if (!twenty) return async () => {};
+  const configured = integration;
+  if (!configured) return async () => {};
 
-  async function processNext(client: TwentyClient) {
+  async function processNext(client: TwentyClient, webhook: TwentyWebhook) {
     const now = new Date();
     const eligible = {
       status: { in: ["pending", "processing"] },
       dueAt: { lte: now },
+      place: { list: { outboundWebhookUrl: webhook.url.href } },
     } satisfies Prisma.CrmDeliveryWhereInput;
     const next = await db.crmDelivery.findFirst({ where: eligible, orderBy: { dueAt: "asc" } });
     if (!next) return;
@@ -168,13 +194,13 @@ export function startCrmDeliveryWorker(db: PrismaClient) {
       where: { placeId: next.placeId },
       include: { place: { select: { placeId: true } } },
     });
-    if (delivery?.leaseToken === token) await deliverCrmRecord(db, delivery, token, client);
+    if (delivery?.leaseToken === token) await deliverCrmRecord(db, delivery, token, client, webhook);
   }
 
   let active: Promise<void> | undefined;
   const tick = () => {
     if (active) return;
-    active = processNext(twenty).catch(() => console.error("Errore durante la lettura della coda CRM."))
+    active = processNext(configured.client, configured.webhook).catch(() => console.error("Errore durante la lettura della coda CRM."))
       .finally(() => { active = undefined; });
   };
   const timer = setInterval(tick, POLL_MS);

@@ -10,7 +10,7 @@ import { makeLogger } from "../log";
 import { generateGrid } from "../grid";
 import { evaluateDeliveryRules, type DeliveryRules } from "../deliveryRules";
 import { runAiAnalysisForPlace, ensureAiAttributes } from "../aiAnalysis";
-import { qualifiesForCrm, registerCrmDelivery } from "../crmDelivery";
+import { forwardsToCrm, qualifiesForCrm, registerCrmDelivery } from "../crmDelivery";
 
 const db = new PrismaClient();
 const log = makeLogger(db);
@@ -126,6 +126,7 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
     return;
   }
   const deliveryRules = list.deliveryRules as DeliveryRules | null;
+  const targetsCrm = forwardsToCrm(list.outboundWebhookUrl);
   if (list.aiAnalysisEnabled) await ensureAiAttributes(db, list.id);
 
   const quotaCap = await getQuotaCap();
@@ -308,7 +309,7 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
               where: { id: place.id },
               data: {
                 deliveryStatus: "failed",
-                crmScreeningPending: !isChain && rulesCheck.allowed && qualifiesForCrm(place),
+                crmScreeningPending: targetsCrm && !isChain && rulesCheck.allowed && qualifiesForCrm(place),
               },
             });
           }
@@ -332,12 +333,10 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
           searchId: search.id,
           placeId: place.id,
         });
-      } else {
-        try {
-          await registerCrmDelivery(db, place, websiteCheck);
-        } finally {
-          await enqueueWebhookDelivery(place.id);
-        }
+      } else if (targetsCrm) {
+        await registerCrmDelivery(db, place, websiteCheck);
+      } else if (list.outboundWebhookUrl) {
+        await enqueueWebhookDelivery(place.id);
       }
     }
 
