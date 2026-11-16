@@ -5,6 +5,8 @@ import { buildAttributes } from "../webhookPayload";
 import { makeLogger } from "../log";
 import { checkWebsiteStatus } from "../websiteCheck";
 import { runAiAnalysisForPlace, AI_ANALYSIS_ATTR_KEY, AI_SCORE_ATTR_KEY } from "../aiAnalysis";
+import { qualifiesForCrm, registerCrmDelivery } from "../crmDelivery";
+import { evaluateDeliveryRules, type DeliveryRules } from "../deliveryRules";
 
 const db = new PrismaClient();
 const log = makeLogger(db);
@@ -15,8 +17,9 @@ interface WebhookDeliveryJobData {
 
 export async function processWebhookDelivery(job: Job<WebhookDeliveryJobData>) {
   const place = await db.place.findUnique({ where: { id: job.data.placeId }, include: { list: true } });
-  if (!place) return;
+  if (!place || place.previewOnly) return;
   const list = place.list;
+  let websiteCheck: Awaited<ReturnType<typeof checkWebsiteStatus>> | null = null;
 
   // Gate analisi→consegna: se questo job arriva da un "Riprova adesso" dopo un fallimento AI
   // (place senza i due campi custom noti), si ritenta l'analisi PRIMA di consegnare — nessun
@@ -33,7 +36,7 @@ export async function processWebhookDelivery(job: Job<WebhookDeliveryJobData>) {
       }),
     ]);
     if (!analysisValue || !scoreValue) {
-      const websiteCheck = place.websiteUrl
+      websiteCheck = place.websiteUrl
         ? await checkWebsiteStatus(place.websiteUrl, list.aiVisionEnabled)
         : null;
       const aiResult = await runAiAnalysisForPlace(db, place, list, { websiteCheck });
@@ -42,7 +45,10 @@ export async function processWebhookDelivery(job: Job<WebhookDeliveryJobData>) {
         return;
       }
       if (aiResult.excludeFromPipeline) {
-        await db.place.update({ where: { id: place.id }, data: { deliveryStatus: "excluded" } });
+        await db.place.update({
+          where: { id: place.id },
+          data: { deliveryStatus: "excluded", crmScreeningPending: false },
+        });
         await log(
           "info",
           "webhook_delivery",
@@ -51,6 +57,20 @@ export async function processWebhookDelivery(job: Job<WebhookDeliveryJobData>) {
         );
         return;
       }
+    }
+  }
+
+  if (place.crmScreeningPending && qualifiesForCrm(place)) {
+    try {
+      const rules = list.deliveryRules as DeliveryRules | null;
+      if (evaluateDeliveryRules(place, rules).allowed) {
+        if (!websiteCheck && place.websiteUrl) websiteCheck = await checkWebsiteStatus(place.websiteUrl);
+        await registerCrmDelivery(db, place, websiteCheck);
+      } else {
+        await db.place.update({ where: { id: place.id }, data: { crmScreeningPending: false } });
+      }
+    } catch {
+      await log("error", "system", "Registrazione della consegna CRM fallita.", { placeId: place.id });
     }
   }
 

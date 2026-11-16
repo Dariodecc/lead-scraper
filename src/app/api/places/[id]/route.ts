@@ -5,7 +5,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const place = await db.place.findUnique({
     where: { id },
-    include: { customValues: { include: { listAttribute: true } } },
+    include: {
+      customValues: { include: { listAttribute: true } },
+      crmDelivery: { select: { status: true, message: true } },
+    },
   });
   if (!place) return NextResponse.json({ error: "Risultato non trovato" }, { status: 404 });
 

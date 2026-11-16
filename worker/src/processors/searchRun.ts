@@ -1,5 +1,5 @@
 import type { Job } from "bullmq";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { nearbySearchPlaceIds, getPlaceDetails, NEARBY_MAX_RESULTS } from "../googlePlaces";
 import { checkWebsiteStatus } from "../websiteCheck";
 import { estimateOpening } from "../lib/openingEstimate";
@@ -10,6 +10,7 @@ import { makeLogger } from "../log";
 import { generateGrid } from "../grid";
 import { evaluateDeliveryRules, type DeliveryRules } from "../deliveryRules";
 import { runAiAnalysisForPlace, ensureAiAttributes } from "../aiAnalysis";
+import { qualifiesForCrm, registerCrmDelivery } from "../crmDelivery";
 
 const db = new PrismaClient();
 const log = makeLogger(db);
@@ -222,7 +223,7 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
 
     for (const placeId of placeIds) {
       const existing = await db.place.findUnique({ where: { placeId } });
-      if (existing) {
+      if (existing && (isTest || !existing.previewOnly)) {
         duplicateCount++;
         continue;
       }
@@ -252,37 +253,45 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
       let isChain = false;
       if (list.excludeChainsThreshold != null) {
         const sameNameCount = await db.place.count({
-          where: { listId: list.id, businessName: { equals: details.businessName, mode: "insensitive" } },
+          where: { listId: list.id, previewOnly: false, businessName: { equals: details.businessName, mode: "insensitive" } },
         });
         isChain = sameNameCount + 1 >= list.excludeChainsThreshold;
       }
 
-      const place = await db.place.create({
-        data: {
-          placeId: details.placeId,
-          businessName: details.businessName || "(nome non disponibile)",
-          address: details.address,
-          lat: details.lat,
-          lng: details.lng,
-          phone: details.phone,
-          listId: search.listId,
-          category: details.category,
-          websiteUrl: details.websiteUrl,
-          websiteStatus,
-          rating: details.rating,
-          reviewCount: details.reviewCount,
-          priceLevel: details.priceLevel,
-          businessStatus: details.businessStatus,
-          estimatedOpeningWindow: bucket,
-          estimationConfidence: confidence,
-          confirmedOpeningDate: details.confirmedOpeningDate,
-          earliestReviewDate: details.earliestReviewDate,
-          firstSeenAt,
-          deliveryStatus: "pending",
-        },
-      });
+      const placeData = {
+        placeId: details.placeId,
+        businessName: details.businessName || "(nome non disponibile)",
+        address: details.address,
+        lat: details.lat,
+        lng: details.lng,
+        phone: details.phone,
+        listId: search.listId,
+        category: details.category,
+        websiteUrl: details.websiteUrl,
+        websiteStatus,
+        rating: details.rating,
+        reviewCount: details.reviewCount,
+        priceLevel: details.priceLevel,
+        businessStatus: details.businessStatus,
+        estimatedOpeningWindow: bucket,
+        estimationConfidence: confidence,
+        confirmedOpeningDate: details.confirmedOpeningDate,
+        earliestReviewDate: details.earliestReviewDate,
+        firstSeenAt,
+        previewOnly: isTest,
+        deliveryStatus: isTest ? "excluded" : "pending",
+      } satisfies Prisma.PlaceUncheckedCreateInput;
+      const place = existing
+        ? await db.$transaction(async (transaction) => {
+            if (existing.listId !== list.id) {
+              await transaction.placeCustomValue.deleteMany({ where: { placeId: existing.id } });
+            }
+            return transaction.place.update({ where: { id: existing.id }, data: placeData });
+          })
+        : await db.place.create({ data: placeData });
       newCount++;
 
+      const rulesCheck = evaluateDeliveryRules(place, deliveryRules);
       // Gate analisi→consegna: se l'AI è attiva per questa lista, la consegna al webhook parte
       // SOLO se l'analisi ha successo — se fallisce (es. OpenAI senza credito) il place resta
       // "failed" e va rilanciato manualmente da Logs ("Riprova adesso"), niente retry automatico.
@@ -294,15 +303,24 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
           searchId: search.id,
         });
         if (!aiResult.success) {
-          await db.place.update({ where: { id: place.id }, data: { deliveryStatus: "failed" } });
-          if (isTest && newCount >= 1) break;
+          if (!isTest) {
+            await db.place.update({
+              where: { id: place.id },
+              data: {
+                deliveryStatus: "failed",
+                crmScreeningPending: !isChain && rulesCheck.allowed && qualifiesForCrm(place),
+              },
+            });
+          }
+          if (isTest) break;
           continue;
         }
         aiExclude = aiResult.excludeFromPipeline;
         aiExcludeReason = aiResult.excludeReason;
       }
 
-      const rulesCheck = evaluateDeliveryRules(place, deliveryRules);
+      if (isTest) break;
+
       if (isChain || aiExclude || !rulesCheck.allowed) {
         const reason = isChain
           ? `probabile catena (nome ripetuto ${list.excludeChainsThreshold}+ volte nella lista)`
@@ -315,10 +333,12 @@ export async function processSearchRun(job: Job<SearchRunJobData>) {
           placeId: place.id,
         });
       } else {
-        await enqueueWebhookDelivery(place.id);
+        try {
+          await registerCrmDelivery(db, place, websiteCheck);
+        } finally {
+          await enqueueWebhookDelivery(place.id);
+        }
       }
-
-      if (isTest && newCount >= 1) break; // un solo esempio nuovo basta per mappare i campi
     }
 
     await db.searchRun.update({

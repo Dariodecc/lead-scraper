@@ -6,6 +6,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params;
   const place = await db.place.findUnique({ where: { id } });
   if (!place) return NextResponse.json({ error: "Risultato non trovato" }, { status: 404 });
+  if (place.previewOnly) return NextResponse.json({ error: "Risultato di anteprima." }, { status: 409 });
 
   await db.place.update({ where: { id }, data: { deliveryStatus: "pending" } });
   await enqueueWebhookDelivery(id);

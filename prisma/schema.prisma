@@ -44,6 +44,14 @@ enum DeliveryStatus {
   excluded // scartato dal filtro di invio della Lista, mai accodato al webhook (§ filtro liste)
 }
 
+enum CrmDeliveryStatus {
+  pending
+  processing
+  review
+  delivered
+  failed
+}
+
 enum ListAttributeType {
   text
   number
@@ -195,6 +203,9 @@ model Place {
   deliveryStatus        DeliveryStatus @default(pending) @map("delivery_status")
   deliveryAttempts      Int            @default(0) @map("delivery_attempts")
   lastDeliveryAttemptAt DateTime?      @map("last_delivery_attempt_at")
+  previewOnly           Boolean        @default(false) @map("preview_only")
+  crmScreeningPending   Boolean        @default(false) @map("crm_screening_pending")
+  crmDelivery           CrmDelivery?
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -205,6 +216,25 @@ model Place {
   @@index([listId])
   @@index([deliveryStatus])
   @@map("places")
+}
+
+model CrmDelivery {
+  placeId       String            @id @map("place_id_fk") @db.Uuid
+  place         Place             @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  status        CrmDeliveryStatus @default(pending)
+  evidence      Json?
+  candidates    Json?
+  companyId     String?           @map("company_id") @db.Uuid
+  opportunityId String?           @map("opportunity_id") @db.Uuid
+  createCompany Boolean           @default(false) @map("create_company")
+  attempts      Int               @default(0)
+  dueAt         DateTime          @default(now()) @map("due_at")
+  leaseToken    String?           @map("lease_token") @db.Uuid
+  message       String?
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  @@index([status, dueAt])
+  @@map("crm_deliveries")
 }
 
 model Search {

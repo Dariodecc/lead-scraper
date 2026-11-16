@@ -39,6 +39,8 @@ interface PlaceRow {
   name: string;
   address: string;
   deliveryStatus: string;
+  previewOnly: boolean;
+  crmStatus: string | null;
   values: string[];
 }
 
@@ -372,11 +374,15 @@ export default function ListePage() {
                     {v}
                   </span>
                 ))}
-                <span
-                  className={`min-w-0 w-fit rounded-full px-3 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[p.deliveryStatus] ?? "bg-muted text-muted-foreground"}`}
-                >
-                  {DELIVERY_STATUS_LABEL[p.deliveryStatus]}
-                </span>
+                <div className="grid justify-items-start gap-1">
+                  <span
+                    className={`w-fit rounded-full px-3 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[p.deliveryStatus] ?? "bg-muted text-muted-foreground"}`}
+                  >
+                    {p.previewOnly ? "Anteprima" : DELIVERY_STATUS_LABEL[p.deliveryStatus]}
+                  </span>
+                  {p.crmStatus === "review" && <span className="text-xs text-muted-foreground">CRM · Da verificare</span>}
+                  {p.crmStatus === "failed" && <span className="text-xs text-destructive">CRM · Errore</span>}
+                </div>
                 <button
                   className="text-xs text-destructive"
                   onClick={() => deletePlace(p.id)}

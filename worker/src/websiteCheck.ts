@@ -43,6 +43,7 @@ export interface WebsiteCheckResult {
   // Testo visibile della pagina, troncato — riusato per l'analisi AI (evita di ricaricare il
   // sito una seconda volta). Assente se il caricamento è fallito.
   pageText: string | null;
+  companyNames: string[];
   // Segnali tecnici REALI (non testo, non un'inferenza del modello) — passati all'analisi AI così
   // "raggiungibilità"/HTTPS/redirect a dominio parcheggiato sono dati osservati, non indovinati
   // da un modello che non può davvero "visitare" nulla (vede solo il testo estratto sotto).
@@ -74,6 +75,7 @@ export async function checkWebsiteStatus(
   const failed: WebsiteCheckResult = {
     status: "outdated",
     pageText: null,
+    companyNames: [],
     httpStatus: null,
     isHttps: null,
     finalUrl: null,
@@ -108,6 +110,27 @@ export async function checkWebsiteStatus(
       .evaluate(() => document.body?.innerText ?? "")
       .then((t) => t.replace(/\s+/g, " ").trim().slice(0, MAX_PAGE_TEXT_CHARS))
       .catch(() => null);
+    const companyNames = await page.evaluate(() => {
+      const candidates: string[] = [];
+      const siteName = document.querySelector('meta[property="og:site_name"]')?.getAttribute("content");
+      if (siteName) candidates.push(siteName);
+      const heading = document.querySelector("h1")?.innerText;
+      if (heading) candidates.push(heading);
+      for (const script of Array.from(document.querySelectorAll('script[type="application/ld+json"]'))) {
+        try {
+          const data = JSON.parse(script.textContent ?? "");
+          const nodes = Array.isArray(data) ? data : [data, ...(Array.isArray(data?.["@graph"]) ? data["@graph"] : [])];
+          for (const node of nodes) {
+            const types: unknown[] = [node?.["@type"]].flat();
+            if (types.some((type) => ["Organization", "Corporation", "LocalBusiness", "Restaurant", "Store"].includes(String(type)))
+              && typeof node.name === "string") candidates.push(node.name);
+          }
+        } catch {
+          // Una pagina può contenere anche markup non valido.
+        }
+      }
+      return candidates.filter((name) => name.length <= 250);
+    }).catch(() => []);
 
     // UN solo screenshot dell'intera pagina (non uno per sezione/scroll) — il costo lo si
     // controlla ridimensionando l'immagine dopo, non facendone di più piccole a pezzi.
@@ -124,6 +147,7 @@ export async function checkWebsiteStatus(
     return {
       status: hasViewportMeta > 0 ? "ok" : "outdated",
       pageText,
+      companyNames,
       httpStatus,
       isHttps,
       finalUrl,

@@ -69,7 +69,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // semplice e robusto di una query SQL grezza, a questo scale.
   const allPlaces = await db.place.findMany({
     where,
-    include: { customValues: true },
+    include: { customValues: true, crmDelivery: { select: { status: true } } },
     orderBy: { createdAt: "desc" },
   });
 
@@ -110,6 +110,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       name: p.businessName,
       address: p.address,
       deliveryStatus: p.deliveryStatus,
+      previewOnly: p.previewOnly,
+      crmStatus: p.crmDelivery?.status ?? null,
       values,
     };
   });

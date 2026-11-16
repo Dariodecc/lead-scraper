@@ -1,9 +1,11 @@
 import { Worker } from "bullmq";
+import { PrismaClient } from "@prisma/client";
 import { connection } from "./queue";
 import { processSearchRun } from "./processors/searchRun";
 import { processWebhookDelivery } from "./processors/webhookDelivery";
 import { startScheduler } from "./scheduler";
 import { closeBrowser } from "./websiteCheck";
+import { startCrmDeliveryWorker } from "./crmDelivery";
 
 const searchRunWorker = new Worker("search-run", processSearchRun, { connection, concurrency: 1 });
 const webhookDeliveryWorker = new Worker("webhook-delivery", processWebhookDelivery, {
@@ -17,9 +19,12 @@ searchRunWorker.on("failed", (job, err) => console.error(`search-run ${job?.id} 
 webhookDeliveryWorker.on("failed", (job, err) => console.error(`webhook-delivery ${job?.id} fallito:`, err));
 
 startScheduler();
+const crmDb = new PrismaClient();
+const stopCrmDelivery = startCrmDeliveryWorker(crmDb);
 
 async function shutdown() {
-  await Promise.all([searchRunWorker.close(), webhookDeliveryWorker.close(), closeBrowser()]);
+  await Promise.all([searchRunWorker.close(), webhookDeliveryWorker.close(), stopCrmDelivery()]);
+  await Promise.all([closeBrowser(), crmDb.$disconnect()]);
   await connection.quit();
   process.exit(0);
 }

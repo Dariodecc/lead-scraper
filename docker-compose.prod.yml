@@ -25,6 +25,7 @@ services:
       REDIS_URL: redis://redis:6379
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      TWENTY_REVIEW_TOKEN: ${TWENTY_REVIEW_TOKEN:-}
     depends_on:
       - postgres
       - redis
@@ -54,6 +55,9 @@ services:
       REDIS_URL: redis://redis:6379
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      TWENTY_BASE_URL: ${TWENTY_BASE_URL:-}
+      TWENTY_API_KEY: ${TWENTY_API_KEY:-}
+      TWENTY_SYNC_START_AT: ${TWENTY_SYNC_START_AT:-}
     depends_on:
       - postgres
       - redis

@@ -20,6 +20,20 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Consegna al CRM MDNT
+
+Il worker usa `TWENTY_BASE_URL` e `TWENTY_API_KEY`. Impostare
+`TWENTY_SYNC_START_AT` con una data ISO completa di fuso orario per attivare il flusso
+dai nuovi risultati. Lasciarla vuota per sospendere la consegna al CRM. Applicare
+lo schema Prisma prima di aggiornare i container web e worker.
+
+Per i lead **Da verificare**, aprire la scheda del risultato e usare il codice
+dell'operatore (`TWENTY_REVIEW_TOKEN` nel container web). Inserire il nome tratto
+da una fonte indipendente e il suo URL, quindi confermare. Se Twenty segnala più
+corrispondenze, scegliere l'azienda CRM dalla stessa scheda.
+
+Per eseguire i test della consegna, usare `npm test --workspace=worker`.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

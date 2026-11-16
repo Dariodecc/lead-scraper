@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { inputClass, selectClass } from "@/components/ui/field";
+import { CrmDeliveryPanel, type CrmDeliverySummary } from "@/components/liste/crm-delivery-panel";
 import {
   WEBSITE_STATUS_LABEL,
   BUCKET_LABEL,
@@ -33,6 +34,8 @@ interface PlaceDetail {
   earliestReviewDate: string | null;
   firstSeenAt: string;
   deliveryStatus: string;
+  previewOnly: boolean;
+  crmDelivery: CrmDeliverySummary | null;
   deliveryAttempts: number;
   lastDeliveryAttemptAt: string | null;
   createdAt: string;
@@ -223,7 +226,7 @@ export default function PlaceDetailPage() {
         <span
           className={`w-fit rounded-full px-3 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[place.deliveryStatus] ?? "bg-muted text-muted-foreground"}`}
         >
-          {DELIVERY_STATUS_LABEL[place.deliveryStatus]}
+          {place.previewOnly ? "Anteprima" : DELIVERY_STATUS_LABEL[place.deliveryStatus]}
         </span>
         <a
           href={`https://www.google.com/maps/place/?q=place_id:${place.placeId}`}
@@ -237,6 +240,8 @@ export default function PlaceDetailPage() {
       <p className="mb-8 text-sm text-muted-foreground">
         {place.category ?? "—"} · {place.address}
       </p>
+
+      {place.crmDelivery && <CrmDeliveryPanel placeId={place.id} delivery={place.crmDelivery} onChange={load} />}
 
       <div className="grid grid-cols-[1fr_1fr] gap-6">
         <div className="flex flex-col gap-5">
