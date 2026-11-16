@@ -1,16 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { inputClass, selectClass } from "@/components/ui/field";
+import { useParams } from "next/navigation";
+import { ArrowSquareOut, Check, Star } from "@phosphor-icons/react";
+import { Input, Select, Textarea } from "@/components/ui/field";
 import { CrmDeliveryPanel, type CrmDeliverySummary } from "@/components/liste/crm-delivery-panel";
+import { PageHeader } from "@/components/ui/page-header";
+import { Panel, PanelBody, PanelHeader, DefRow } from "@/components/ui/panel";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { PageSkeleton } from "@/components/ui/skeleton";
+import { DeliveryBadge, LevelBadge } from "@/components/status-badges";
+import { formatDate, formatDateTime } from "@/lib/format";
 import {
   WEBSITE_STATUS_LABEL,
   BUCKET_LABEL,
   CONFIDENCE_LABEL,
-  DELIVERY_STATUS_LABEL,
   BUSINESS_STATUS_LABEL,
 } from "@/lib/placeFields";
+import { cn } from "@/lib/utils";
 
 interface PlaceDetail {
   id: string;
@@ -65,26 +73,23 @@ const PRICE_LABEL: Record<number, string> = {
   4: "€€€€ — molto alto",
 };
 
-const STATUS_BADGE_CLASS: Record<string, string> = {
-  delivered: "bg-success/10 text-success",
-  failed: "bg-destructive/10 text-destructive",
-  excluded: "bg-warning/10 text-warning",
-  pending: "bg-muted text-muted-foreground",
+const LEVEL_DOT: Record<string, string> = {
+  info: "bg-muted-foreground/50",
+  warning: "bg-warning",
+  error: "bg-destructive",
 };
 
-const LEVEL_STYLE: Record<string, string> = {
-  info: "bg-muted text-muted-foreground",
-  warning: "bg-warning/10 text-warning",
-  error: "bg-destructive/10 text-destructive",
-};
-
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex justify-between border-b border-hairline-soft pb-2.5">
-      <span className="text-[13px] text-muted-foreground">{label}</span>
-      <span className="text-[13px]">{value}</span>
+    <div className="px-5 py-4">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1.5 text-[15px] font-semibold leading-snug tracking-tight">{children}</div>
     </div>
   );
+}
+
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return <h3 className="mb-1 mt-5 text-xs font-medium text-muted-foreground first:mt-0">{children}</h3>;
 }
 
 function CustomValueInput({
@@ -105,13 +110,24 @@ function CustomValueInput({
     if (attribute.type === "boolean") parsed = draft === "true";
     onSave(parsed);
     setSaved(true);
-    setTimeout(() => setSaved(false), 1200);
+    setTimeout(() => setSaved(false), 1400);
   }
+
+  const savedMark = (
+    <span aria-live="polite" className="inline-flex h-5 items-center gap-1 text-xs font-medium text-success-fg">
+      {saved && (
+        <>
+          <Check size={12} weight="bold" aria-hidden />
+          Salvato
+        </>
+      )}
+    </span>
+  );
 
   if (attribute.type === "boolean") {
     return (
-      <select
-        className={selectClass}
+      <Select
+        aria-label={attribute.name}
         value={draft || "false"}
         onChange={(e) => {
           setDraft(e.target.value);
@@ -120,14 +136,14 @@ function CustomValueInput({
       >
         <option value="true">Sì</option>
         <option value="false">No</option>
-      </select>
+      </Select>
     );
   }
 
   if (attribute.type === "select" && attribute.options && attribute.options.length > 0) {
     return (
-      <select
-        className={selectClass}
+      <Select
+        aria-label={attribute.name}
         value={draft}
         onChange={(e) => {
           setDraft(e.target.value);
@@ -140,42 +156,41 @@ function CustomValueInput({
             {o}
           </option>
         ))}
-      </select>
+      </Select>
     );
   }
 
   if (attribute.type === "text") {
     return (
-      <div className="flex flex-col gap-1.5">
-        <textarea
+      <div className="grid gap-1">
+        <Textarea
+          aria-label={attribute.name}
           rows={4}
-          className={`${inputClass} h-auto py-2.5`}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
         />
-        {saved && <span className="text-xs text-success">Salvato ✓</span>}
+        {savedMark}
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <input
+    <div className="grid gap-1">
+      <Input
+        aria-label={attribute.name}
         type={attribute.type === "number" ? "number" : attribute.type === "date" ? "date" : "text"}
-        className={`${inputClass} flex-1`}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => e.key === "Enter" && commit()}
       />
-      {saved && <span className="text-xs text-success">Salvato ✓</span>}
+      {savedMark}
     </div>
   );
 }
 
 export default function PlaceDetailPage() {
-  const router = useRouter();
   const params = useParams<{ listId: string; placeId: string }>();
   const [place, setPlace] = useState<PlaceDetail | null>(null);
   const [listName, setListName] = useState("");
@@ -211,172 +226,201 @@ export default function PlaceDetailPage() {
     load();
   }
 
-  if (!place) return <div className="px-12 pb-12 pt-10 text-sm text-muted-foreground">Caricamento…</div>;
+  if (!place) return <PageSkeleton rows={8} />;
 
   return (
-    <div className="px-12 pb-12 pt-10">
-      <button
-        className="mb-2.5 p-0 text-[13px] text-muted-foreground"
-        onClick={() => router.push(`/liste?list=${params.listId}`)}
-      >
-        ← Torna a {listName || "lista"}
-      </button>
-      <div className="mb-6 flex items-center gap-3">
-        <h1 className="text-[28px] font-semibold tracking-tight">{place.businessName}</h1>
-        <span
-          className={`w-fit rounded-full px-3 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[place.deliveryStatus] ?? "bg-muted text-muted-foreground"}`}
-        >
-          {place.previewOnly ? "Anteprima" : DELIVERY_STATUS_LABEL[place.deliveryStatus]}
-        </span>
-        <a
-          href={`https://www.google.com/maps/place/?q=place_id:${place.placeId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs font-medium underline"
-        >
-          Vedi su Google Maps ↗
-        </a>
-      </div>
-      <p className="mb-8 text-sm text-muted-foreground">
-        {place.category ?? "—"} · {place.address}
-      </p>
+    <>
+      <PageHeader
+        back={{ label: listName || "Lista", href: `/liste?list=${params.listId}` }}
+        title={
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {place.businessName}
+            <span className="text-base">
+              <DeliveryBadge status={place.deliveryStatus} previewOnly={place.previewOnly} />
+            </span>
+          </span>
+        }
+        description={`${place.category ?? "—"} · ${place.address}`}
+        actions={
+          <a
+            href={`https://www.google.com/maps/place/?q=place_id:${place.placeId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={buttonVariants({ variant: "outline" })}
+          >
+            Vedi su Google Maps
+            <ArrowSquareOut aria-hidden />
+          </a>
+        }
+      />
 
       {place.crmDelivery && <CrmDeliveryPanel placeId={place.id} delivery={place.crmDelivery} onChange={load} />}
 
-      <div className="grid grid-cols-[1fr_1fr] gap-6">
-        <div className="flex flex-col gap-5">
-          <div className="rounded-xl border border-border bg-muted p-5">
-            <div className="mb-3.5 text-[13px] font-semibold">Dati</div>
-            <div className="flex flex-col gap-3.5">
-              <Row label="Telefono" value={<span className="font-mono">{place.phone ?? "—"}</span>} />
-              <Row
-                label="URL sito"
-                value={
-                  place.websiteUrl ? (
-                    <a
-                      href={place.websiteUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="max-w-[220px] truncate underline"
-                      title={place.websiteUrl}
-                    >
-                      {place.websiteUrl}
-                    </a>
-                  ) : (
-                    "—"
-                  )
-                }
-              />
-              <Row
-                label="Stato sito"
-                value={
-                  <span className="rounded-full bg-background px-3 py-0.5 text-xs font-medium">
-                    {WEBSITE_STATUS_LABEL[place.websiteStatus] ?? place.websiteStatus}
-                  </span>
-                }
-              />
-              <Row
-                label="Rating / recensioni"
-                value={
-                  place.rating != null ? `${place.rating}★ · ${place.reviewCount ?? 0} recensioni` : "Nessun dato"
-                }
-              />
-              <Row
-                label="Fascia di prezzo (size proxy)"
-                value={place.priceLevel ? PRICE_LABEL[place.priceLevel] : "Non disponibile"}
-              />
-              <Row
-                label="Stato attività"
-                value={
-                  place.businessStatus ? (
-                    <span className="rounded-full bg-background px-3 py-0.5 text-xs font-medium">
-                      {BUSINESS_STATUS_LABEL[place.businessStatus] ?? place.businessStatus}
-                    </span>
-                  ) : (
-                    "—"
-                  )
-                }
-              />
-              <Row
-                label="Apertura stimata"
-                value={
-                  <span className="rounded-full bg-background px-3 py-0.5 text-xs font-semibold">
-                    {BUCKET_LABEL[place.estimatedOpeningWindow]}
-                  </span>
-                }
-              />
-              <Row label="Confidenza stima" value={CONFIDENCE_LABEL[place.estimationConfidence]} />
-              {place.confirmedOpeningDate && (
-                <Row
-                  label="Data apertura confermata"
-                  value={new Date(place.confirmedOpeningDate).toLocaleDateString("it-IT")}
-                />
-              )}
-              <Row
-                label="Recensione più vecchia"
-                value={
-                  place.earliestReviewDate
-                    ? new Date(place.earliestReviewDate).toLocaleDateString("it-IT")
-                    : "Nessun dato"
-                }
-              />
-              <Row label="Coordinate" value={<span className="font-mono">{place.lat}, {place.lng}</span>} />
-              <Row label="Google Place ID" value={<span className="font-mono text-[11px]">{place.placeId}</span>} />
-              <Row label="Prima comparsa" value={new Date(place.firstSeenAt).toLocaleString("it-IT")} />
-              <Row
-                label="Tentativi di consegna"
-                value={
-                  place.lastDeliveryAttemptAt
-                    ? `${place.deliveryAttempts} · ultimo ${new Date(place.lastDeliveryAttemptAt).toLocaleString("it-IT")}`
-                    : "Nessuno ancora"
-                }
-              />
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-muted p-5">
-            <div className="mb-1 text-[13px] font-semibold">Campi personalizzati</div>
-            <div className="mb-3.5 text-xs text-muted-soft">
-              Valori scritti dall&apos;analisi AI o inseriti a mano — modificabili qui.
-            </div>
-            {attributes.length === 0 && (
-              <div className="text-xs text-muted-soft">Nessun campo custom in questa lista</div>
+      <Panel className="rise mb-6 overflow-hidden" style={{ "--i": 1 } as React.CSSProperties}>
+        <div className="grid grid-cols-2 divide-border max-lg:divide-y lg:grid-cols-4 lg:divide-x [&>*:nth-child(odd)]:max-lg:border-r [&>*:nth-child(odd)]:max-lg:border-border">
+          <Fact label="Valutazione">
+            {place.rating != null ? (
+              <span className="num inline-flex items-center gap-1.5">
+                <Star size={15} weight="fill" className="text-warning" aria-hidden />
+                {place.rating}
+                <span className="text-[13px] font-normal text-muted-foreground">
+                  · {place.reviewCount ?? 0} recensioni
+                </span>
+              </span>
+            ) : (
+              <span className="font-normal text-muted-soft">Nessun dato</span>
             )}
-            <div className="flex flex-col gap-3">
-              {attributes.map((a) => (
-                <div key={a.id}>
-                  <label className="mb-1 block text-xs font-medium text-foreground/80">{a.name}</label>
-                  <CustomValueInput
-                    attribute={a}
-                    value={place.customAttributes[a.key]}
-                    onSave={(value) => saveCustomValue(a.id, value)}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
+          </Fact>
+          <Fact label="Apertura stimata">
+            {BUCKET_LABEL[place.estimatedOpeningWindow]}
+            <span className="ml-1.5 text-[13px] font-normal text-muted-foreground">
+              · confidenza {CONFIDENCE_LABEL[place.estimationConfidence]?.toLowerCase()}
+            </span>
+          </Fact>
+          <Fact label="Sito web">
+            <Badge tone={place.websiteStatus === "none" ? "warning" : place.websiteStatus === "outdated" ? "neutral" : "success"}>
+              {WEBSITE_STATUS_LABEL[place.websiteStatus] ?? place.websiteStatus}
+            </Badge>
+          </Fact>
+          <Fact label="Telefono">
+            <span className="num font-mono text-sm">{place.phone ?? "—"}</span>
+          </Fact>
         </div>
+      </Panel>
 
-        <div className="rounded-xl border border-border bg-muted p-5">
-          <div className="mb-3.5 text-[13px] font-semibold">Log di questa entry</div>
-          {logs.length === 0 && <div className="text-xs text-muted-soft">Nessun log ancora</div>}
-          <div className="flex flex-col gap-2.5">
-            {logs.map((l) => (
-              <div key={l.id} className="rounded-md border border-border bg-background p-3">
-                <div className="mb-1 flex items-center justify-between">
-                  <span className={`w-fit rounded-full px-2.5 py-0.5 text-[11px] font-medium ${LEVEL_STYLE[l.level]}`}>
-                    {l.level}
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+        <Panel className="rise" style={{ "--i": 2 } as React.CSSProperties}>
+          <PanelHeader title="Dettagli" />
+          <PanelBody>
+            <dl>
+              <SubHeading>Contatti</SubHeading>
+              <DefRow label="Telefono">
+                <span className="num font-mono">{place.phone ?? "—"}</span>
+              </DefRow>
+              <DefRow label="URL sito">
+                {place.websiteUrl ? (
+                  <a
+                    href={place.websiteUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block max-w-full truncate align-bottom text-brand underline-offset-2 hover:underline"
+                    title={place.websiteUrl}
+                  >
+                    {place.websiteUrl}
+                  </a>
+                ) : (
+                  "—"
+                )}
+              </DefRow>
+              <DefRow label="Stato sito">{WEBSITE_STATUS_LABEL[place.websiteStatus] ?? place.websiteStatus}</DefRow>
+
+              <SubHeading>Su Google</SubHeading>
+              <DefRow label="Rating / recensioni">
+                {place.rating != null ? (
+                  <span className="num">
+                    {place.rating}★ · {place.reviewCount ?? 0} recensioni
                   </span>
-                  <span className="text-[11px] text-muted-soft">
-                    {new Date(l.createdAt).toLocaleString("it-IT")}
-                  </span>
+                ) : (
+                  "Nessun dato"
+                )}
+              </DefRow>
+              <DefRow label="Fascia di prezzo">{place.priceLevel ? PRICE_LABEL[place.priceLevel] : "Non disponibile"}</DefRow>
+              <DefRow label="Stato attività">
+                {place.businessStatus ? BUSINESS_STATUS_LABEL[place.businessStatus] ?? place.businessStatus : "—"}
+              </DefRow>
+
+              <SubHeading>Stima di apertura</SubHeading>
+              <DefRow label="Apertura stimata">
+                <span className="font-semibold">{BUCKET_LABEL[place.estimatedOpeningWindow]}</span>
+              </DefRow>
+              <DefRow label="Confidenza stima">{CONFIDENCE_LABEL[place.estimationConfidence]}</DefRow>
+              {place.confirmedOpeningDate && (
+                <DefRow label="Data apertura confermata">{formatDate(place.confirmedOpeningDate)}</DefRow>
+              )}
+              <DefRow label="Recensione più vecchia">
+                {place.earliestReviewDate ? formatDate(place.earliestReviewDate) : "Nessun dato"}
+              </DefRow>
+
+              <SubHeading>Sistema</SubHeading>
+              <DefRow label="Coordinate">
+                <span className="num font-mono text-xs">
+                  {place.lat}, {place.lng}
+                </span>
+              </DefRow>
+              <DefRow label="Google Place ID">
+                <span className="break-all font-mono text-[11px]">{place.placeId}</span>
+              </DefRow>
+              <DefRow label="Prima comparsa">
+                <span className="num">{formatDateTime(place.firstSeenAt)}</span>
+              </DefRow>
+              <DefRow label="Tentativi di consegna">
+                <span className="num">
+                  {place.lastDeliveryAttemptAt
+                    ? `${place.deliveryAttempts} · ultimo ${formatDateTime(place.lastDeliveryAttemptAt)}`
+                    : "Nessuno ancora"}
+                </span>
+              </DefRow>
+            </dl>
+          </PanelBody>
+        </Panel>
+
+        <div className="grid gap-6">
+          <Panel className="rise" style={{ "--i": 3 } as React.CSSProperties}>
+            <PanelHeader
+              title="Campi personalizzati"
+              description="Valori scritti dall'analisi AI o inseriti a mano. Si salvano quando esci dal campo."
+            />
+            <PanelBody>
+              {attributes.length === 0 ? (
+                <p className="text-[13px] text-muted-soft">Nessun campo personalizzato in questa lista.</p>
+              ) : (
+                <div className="grid gap-4">
+                  {attributes.map((a) => (
+                    <div key={a.id} className="grid gap-1.5">
+                      <span className="text-[13px] font-medium">{a.name}</span>
+                      <CustomValueInput
+                        attribute={a}
+                        value={place.customAttributes[a.key]}
+                        onSave={(value) => saveCustomValue(a.id, value)}
+                      />
+                    </div>
+                  ))}
                 </div>
-                <div className="text-xs">{l.message}</div>
-              </div>
-            ))}
-          </div>
+              )}
+            </PanelBody>
+          </Panel>
+
+          <Panel className="rise" style={{ "--i": 4 } as React.CSSProperties}>
+            <PanelHeader title="Attività di questa entry" description="Esecuzioni, analisi e consegne che la riguardano." />
+            {logs.length === 0 ? (
+              <PanelBody>
+                <p className="text-[13px] text-muted-soft">Nessun evento registrato.</p>
+              </PanelBody>
+            ) : (
+              <ol className="relative px-5 py-4">
+                <span aria-hidden className="absolute bottom-6 left-[27px] top-6 w-px bg-border" />
+                {logs.map((l) => (
+                  <li key={l.id} className="relative flex gap-3 py-2.5">
+                    <span
+                      aria-hidden
+                      className={cn("relative z-10 mt-1.5 size-2.5 shrink-0 rounded-full ring-4 ring-card", LEVEL_DOT[l.level] ?? "bg-muted-foreground/50")}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                        <LevelBadge level={l.level} />
+                        <time dateTime={l.createdAt} className="num text-xs text-muted-soft">
+                          {formatDateTime(l.createdAt)}
+                        </time>
+                      </div>
+                      <p className="mt-1.5 break-words text-[13px] text-muted-foreground">{l.message}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Panel>
         </div>
       </div>
-    </div>
+    </>
   );
 }

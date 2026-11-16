@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { inputClass, selectClass } from "@/components/ui/field";
+import { Check, Plus, Trash, X } from "@phosphor-icons/react";
+import { Field, Input, Select, Textarea, inputClass, selectClass } from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Tabs } from "@/components/ui/tabs";
+import { useConfirm } from "@/components/ui/confirm";
+import { useToast } from "@/components/ui/toast";
 import { FIXED_PLACE_FIELDS } from "@/lib/placeFields";
+import { formatUsd } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import {
   DELIVERY_RULE_FIELDS,
   DELIVERY_RULE_OPERATORS,
@@ -40,29 +48,48 @@ Rispondi SOLO con un oggetto JSON valido con questi campi:
 // tile (developers.openai.com/api/docs/guides/images-vision) — non una stima a caso.
 const VISION_MAX_TOKENS = 2833 + 6 * 5667;
 
-function formatUsd(v: number): string {
-  return `$${v.toFixed(4)}`;
-}
+type TabKey = "colonne" | "campi" | "ai" | "filtri" | "webhook";
 
-function SectionCard({
+function Block({
   title,
   description,
   children,
 }: {
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div className="mb-4 rounded-lg border border-border bg-background p-4">
-      <div className="mb-1 text-[13px] font-semibold">{title}</div>
-      {description && <div className="mb-3 text-xs text-muted-soft">{description}</div>}
+    <section className="border-b border-border py-6 first:pt-0 last:border-0 last:pb-0">
+      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+      {description && <p className="mt-1 max-w-[62ch] text-[13px] leading-relaxed text-muted-foreground">{description}</p>}
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+/** Pulsante a chip on/off per scegliere campi (colonne, payload webhook). */
+function ChipToggle({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] font-medium transition-colors",
+        active
+          ? "border-brand/40 bg-brand-soft text-brand"
+          : "border-border bg-card text-muted-foreground hover:border-foreground/25 hover:text-foreground",
+      )}
+    >
+      {active && <Check size={13} weight="bold" aria-hidden />}
       {children}
-    </div>
+    </button>
   );
 }
 
 function DeliveryFilterSection({
+  tab,
   listId,
   initialRules,
   initialChainThreshold,
@@ -75,6 +102,7 @@ function DeliveryFilterSection({
   attributes,
   onChanged,
 }: {
+  tab: TabKey;
   listId: string;
   initialRules: DeliveryRules | null;
   initialChainThreshold: number | null;
@@ -87,9 +115,8 @@ function DeliveryFilterSection({
   attributes: ListAttribute[];
   onChanged: () => void;
 }) {
-  const [conditions, setConditions] = useState<DeliveryRuleCondition[]>(
-    initialRules?.conditions ?? [],
-  );
+  const toast = useToast();
+  const [conditions, setConditions] = useState<DeliveryRuleCondition[]>(initialRules?.conditions ?? []);
   const [chainThreshold, setChainThreshold] = useState<string>(
     initialChainThreshold != null ? String(initialChainThreshold) : "",
   );
@@ -100,7 +127,7 @@ function DeliveryFilterSection({
   const [webhookUrl, setWebhookUrl] = useState(initialWebhookUrl ?? "");
   const [webhookSecret, setWebhookSecret] = useState("");
   const [outboundFields, setOutboundFields] = useState<string[]>(initialOutboundFields ?? []);
-  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -120,222 +147,267 @@ function DeliveryFilterSection({
   }
 
   async function save() {
-    await fetch(`/api/lists/${listId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        deliveryRules: conditions.length > 0 ? { conditions } : null,
-        excludeChainsThreshold: chainThreshold.trim() ? Number(chainThreshold) : null,
-        aiAnalysisEnabled: aiEnabled,
-        aiPromptMd: aiEnabled ? aiPromptMd : null,
-        aiVisionEnabled: aiEnabled && aiVisionEnabled,
-        outboundWebhookUrl: webhookUrl,
-        outboundWebhookSecret: webhookSecret || undefined,
-        outboundFields: outboundFields.length > 0 ? outboundFields : null,
-      }),
-    });
-    setWebhookSecret("");
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
-    onChanged();
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/lists/${listId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deliveryRules: conditions.length > 0 ? { conditions } : null,
+          excludeChainsThreshold: chainThreshold.trim() ? Number(chainThreshold) : null,
+          aiAnalysisEnabled: aiEnabled,
+          aiPromptMd: aiEnabled ? aiPromptMd : null,
+          aiVisionEnabled: aiEnabled && aiVisionEnabled,
+          outboundWebhookUrl: webhookUrl,
+          outboundWebhookSecret: webhookSecret || undefined,
+          outboundFields: outboundFields.length > 0 ? outboundFields : null,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast({ title: "Salvataggio non riuscito", description: data.error, tone: "danger" });
+        return;
+      }
+      setWebhookSecret("");
+      toast({ title: "Impostazioni salvate", tone: "success" });
+      onChanged();
+    } finally {
+      setSaving(false);
+    }
   }
 
+  const showSave = tab === "ai" || tab === "filtri" || tab === "webhook";
+
   return (
-    <div>
-      <SectionCard
-        title="Analisi AI del lead (OpenAI)"
-        description="Per ogni nuovo risultato crea 6 campi: Analisi, Punteggio contattabilità (0-100, ordinabile in tabella — la priorità di contatto è il punteggio stesso), Escludi da pipeline, Motivo esclusione, Motivo pipeline, Sito online dal (richiede la chiave API in Impostazioni). Se l'AI segnala l'esclusione (catena, multinazionale, sito già ottimo, attività chiusa), il risultato non viene inviato al webhook — stesso meccanismo delle catene rilevate a testo sotto. Se l'analisi fallisce del tutto (es. errore OpenAI), il risultato NON viene inviato finché non la rilanci da Logs."
-      >
-        <label className="mb-3 flex items-center gap-2 text-[13px]">
-          <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} />
-          Attiva analisi AI per questa lista
-        </label>
-        {aiEnabled && (
-          <div className="rounded-md border border-border bg-muted p-3.5">
-            <label className="mb-1.5 block text-[13px] font-medium">
-              Prompt di analisi personalizzato (Markdown) — opzionale
-            </label>
-            <div className="mb-2 text-[11px] text-muted-soft">
-              Se compilato, <strong>sostituisce integralmente</strong> le istruzioni di default —
-              devi includere tu la richiesta di rispondere in JSON con almeno i campi{" "}
-              <code>punteggio</code> (0-100), <code>escludi_da_pipeline</code> (booleano) e{" "}
-              <code>descrizione</code>: se ne ometti anche solo uno l&apos;analisi fallirà, con
-              l&apos;errore visibile nei Logs. I dati dell&apos;attività (nome, sito, rating, segnali
-              tecnici reali del sito, testo estratto dalla pagina) vengono allegati automaticamente
-              sotto al tuo prompt. Lascia vuoto per usare le istruzioni di default.
-            </div>
-            <textarea
-              rows={10}
-              placeholder={AI_PROMPT_PLACEHOLDER}
-              className={`${inputClass} font-mono text-xs`}
-              value={aiPromptMd}
-              onChange={(e) => setAiPromptMd(e.target.value)}
-            />
-
-            <label className="mt-4 flex items-start gap-2 text-[13px]">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={aiVisionEnabled}
-                onChange={(e) => setAiVisionEnabled(e.target.checked)}
-              />
-              <span>
-                Analizza anche uno screenshot del sito (visione gpt-4o-mini) — l&apos;AI vede
-                davvero il design invece di dedurlo dal solo testo estratto. Spento di default:
-                <strong> costo aggiuntivo reale fino a {formatUsd((VISION_MAX_TOKENS / 1_000_000) * openAiInputCostPer1M)} per lead con sito</strong>{" "}
-                (screenshot dell&apos;intera pagina in un&apos;unica immagine, ridimensionata prima
-                dell&apos;invio — non 3-4 scatti separati — ma le immagini su gpt-4o-mini costano
-                molto più del solo testo: {VISION_MAX_TOKENS.toLocaleString("it-IT")} token contro
-                le poche centinaia di un&apos;analisi testuale. Calcolato dal tasso OpenAI impostato
-                in Impostazioni.)
-              </span>
-            </label>
-          </div>
-        )}
-      </SectionCard>
-
-      <SectionCard
-        title="Esclusione automatica catene"
-        description="Nessuna lista di brand da mantenere a mano — si basa su ciò che la lista osserva da sola."
-      >
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Se lo stesso nome compare già</span>
-          <input
-            type="number"
-            min={2}
-            placeholder="es. 2"
-            className={`${inputClass} w-20`}
-            value={chainThreshold}
-            onChange={(e) => setChainThreshold(e.target.value)}
-          />
-          <span className="text-xs text-muted-foreground">o più volte in questa lista</span>
-        </div>
-        <div className="text-[11px] text-muted-soft">
-          Esempio con soglia 2: la ricerca trova un &ldquo;McDonald&apos;s&rdquo; → va bene, è il
-          primo con quel nome, resta Nuovo. Più avanti (stessa lista, anche da un&apos;altra
-          ricerca) ne trova un secondo → quello viene segnato Escluso, perché il sistema deduce
-          da solo &ldquo;stesso nome due volte = probabile catena con più sedi&rdquo;. Vale solo da
-          quando attivi la soglia in poi — chi era già stato trovato prima non viene ricontrollato.
-          Lascia vuoto per disattivare.
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        title="Filtro di invio (regole manuali)"
-        description="Condizioni deterministiche e gratuite (nessuna chiamata AI), utili anche senza Analisi AI attiva — es. 'invia solo se rating ≥ 4' o 'escludi categoria X'. Un risultato che non passa resta salvato e visibile (stato 'Escluso'), solo non viene inviato. Tutte le condizioni sotto sono richieste insieme (E). Si applicano DOPO l'eventuale esclusione AI/catene."
-      >
-        {conditions.map((c, i) => (
-          <div key={i} className="mb-2 flex items-center gap-2">
-            <select
-              className={selectClass}
-              style={{ width: 150 }}
-              value={c.field}
-              onChange={(e) => updateCondition(i, { field: e.target.value })}
-            >
-              {DELIVERY_RULE_FIELDS.map((f) => (
-                <option key={f.key} value={f.key}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-            <select
-              className={selectClass}
-              style={{ width: 190 }}
-              value={c.operator}
-              onChange={(e) => updateCondition(i, { operator: e.target.value as DeliveryRuleCondition["operator"] })}
-            >
-              {DELIVERY_RULE_OPERATORS.map((o) => (
-                <option key={o.key} value={o.key}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              placeholder="valore"
-              className={`${inputClass} flex-1`}
-              value={c.value}
-              onChange={(e) => updateCondition(i, { value: e.target.value })}
-            />
-            <button
-              type="button"
-              className="text-xs text-destructive"
-              onClick={() => setConditions((cs) => cs.filter((_, idx) => idx !== i))}
-            >
-              Rimuovi
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          className="text-xs font-semibold underline"
-          onClick={() => setConditions((cs) => [...cs, emptyCondition()])}
+    <>
+      <div hidden={tab !== "ai"}>
+        <Block
+          title="Analisi AI del lead"
+          description="Per ogni nuovo risultato l'AI scrive una valutazione e un punteggio di contattabilità, e può escluderlo dall'invio (catena, multinazionale, sito già ottimo, attività chiusa)."
         >
-          + Aggiungi condizione
-        </button>
-      </SectionCard>
+          <div className="grid gap-5">
+            <Switch
+              checked={aiEnabled}
+              onChange={setAiEnabled}
+              label="Attiva l'analisi AI per questa lista"
+              description="Richiede la chiave API OpenAI in Impostazioni."
+            />
 
-      <SectionCard
-        title="Webhook di questa lista"
-        description="Configurabile SOLO qui, per lista — nessun default globale né override per ricerca."
-      >
-        <input
-          type="text"
-          placeholder="https://crm.tuodominio.com/api/webhooks/lead-scraper"
-          className={`${inputClass} mb-3 font-mono`}
-          value={webhookUrl}
-          onChange={(e) => setWebhookUrl(e.target.value)}
-        />
-        <input
-          type="password"
-          placeholder={initialHasWebhookSecret ? "Secret già impostato — lascia vuoto per non cambiarlo" : "Shared secret"}
-          className={`${inputClass} mb-3.5`}
-          value={webhookSecret}
-          onChange={(e) => setWebhookSecret(e.target.value)}
-        />
-        <div className="mb-2 text-xs font-medium text-foreground/80">Campi da inviare nel payload</div>
-        <div className="flex flex-wrap gap-2">
-          {FIXED_PLACE_FIELDS.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => toggleOutboundField(f.key)}
-              className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
-                outboundFields.includes(f.key)
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-background text-muted-foreground"
-              }`}
+            <details className="group rounded-md border border-border bg-muted/50 px-3.5 py-2.5 text-xs leading-relaxed text-muted-foreground">
+              <summary className="cursor-pointer text-[13px] font-medium text-foreground marker:text-muted-soft">
+                Come funziona
+              </summary>
+              <p className="mt-2">
+                Crea 6 campi: Analisi, Punteggio contattabilità (0-100, ordinabile in tabella — la priorità di contatto
+                è il punteggio stesso), Escludi da pipeline, Motivo esclusione, Motivo pipeline, Sito online dal. Se
+                l&apos;AI segnala l&apos;esclusione, il risultato non viene inviato al webhook — stesso meccanismo delle
+                catene rilevate a testo (scheda Filtri). Se l&apos;analisi fallisce del tutto (es. errore OpenAI), il
+                risultato NON viene inviato finché non la rilanci da Logs.
+              </p>
+            </details>
+
+            {aiEnabled && (
+              <>
+                <Field
+                  label="Prompt di analisi personalizzato (Markdown)"
+                  optional
+                  hint={
+                    <>
+                      Se compilato, <strong className="font-semibold text-foreground">sostituisce integralmente</strong>{" "}
+                      le istruzioni di default: devi includere tu la richiesta di rispondere in JSON con almeno{" "}
+                      <code className="font-mono">punteggio</code> (0-100), <code className="font-mono">escludi_da_pipeline</code>{" "}
+                      (booleano) e <code className="font-mono">descrizione</code>. Se ne ometti uno l&apos;analisi fallirà
+                      (errore visibile nei Logs). I dati dell&apos;attività vengono allegati in automatico sotto al tuo
+                      prompt. Lascia vuoto per le istruzioni di default.
+                    </>
+                  }
+                >
+                  <Textarea
+                    rows={10}
+                    placeholder={AI_PROMPT_PLACEHOLDER}
+                    className="font-mono text-xs"
+                    value={aiPromptMd}
+                    onChange={(e) => setAiPromptMd(e.target.value)}
+                  />
+                </Field>
+
+                <Switch
+                  checked={aiVisionEnabled}
+                  onChange={setAiVisionEnabled}
+                  label="Analizza anche uno screenshot del sito (visione gpt-4o-mini)"
+                  description={
+                    <>
+                      L&apos;AI vede davvero il design invece di dedurlo dal solo testo estratto. Spento di default:{" "}
+                      <strong className="font-semibold text-foreground">
+                        costo aggiuntivo reale fino a {formatUsd((VISION_MAX_TOKENS / 1_000_000) * openAiInputCostPer1M, 4)}{" "}
+                        per lead con sito
+                      </strong>{" "}
+                      (screenshot dell&apos;intera pagina in un&apos;unica immagine, ridimensionata prima dell&apos;invio).
+                      Le immagini costano molto più del solo testo: {VISION_MAX_TOKENS.toLocaleString("it-IT")} token
+                      contro le poche centinaia di un&apos;analisi testuale. Calcolato dal tasso OpenAI impostato in
+                      Impostazioni.
+                    </>
+                  }
+                />
+              </>
+            )}
+          </div>
+        </Block>
+      </div>
+
+      <div hidden={tab !== "filtri"}>
+        <Block
+          title="Esclusione automatica catene"
+          description="Nessuna lista di brand da mantenere a mano: si basa su ciò che la lista osserva da sola."
+        >
+          <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+            <label htmlFor="chain-threshold">Se lo stesso nome compare già</label>
+            <input
+              id="chain-threshold"
+              type="number"
+              min={2}
+              placeholder="es. 2"
+              className={cn(inputClass, "num w-20")}
+              value={chainThreshold}
+              onChange={(e) => setChainThreshold(e.target.value)}
+            />
+            <span>o più volte in questa lista</span>
+          </div>
+          <details className="mt-3 rounded-md border border-border bg-muted/50 px-3.5 py-2.5 text-xs leading-relaxed text-muted-foreground">
+            <summary className="cursor-pointer text-[13px] font-medium text-foreground marker:text-muted-soft">
+              Esempio
+            </summary>
+            <p className="mt-2">
+              Con soglia 2: la ricerca trova un &ldquo;McDonald&apos;s&rdquo; → va bene, è il primo con quel nome, resta
+              Nuovo. Più avanti (stessa lista, anche da un&apos;altra ricerca) ne trova un secondo → viene segnato
+              Escluso, perché il sistema deduce da solo &ldquo;stesso nome due volte = probabile catena con più
+              sedi&rdquo;. Vale solo da quando attivi la soglia: chi era già stato trovato prima non viene
+              ricontrollato. Lascia vuoto per disattivare.
+            </p>
+          </details>
+        </Block>
+
+        <Block
+          title="Filtro di invio (regole manuali)"
+          description="Condizioni deterministiche e gratuite (nessuna chiamata AI), utili anche senza Analisi AI: es. «invia solo se rating ≥ 4». Un risultato che non passa resta salvato e visibile (stato Escluso), ma non viene inviato. Tutte le condizioni sono richieste insieme (E) e si applicano dopo l'eventuale esclusione AI/catene."
+        >
+          <div className="grid gap-2">
+            {conditions.map((c, i) => (
+              <div key={i} className="grid gap-2 sm:grid-cols-[150px_190px_minmax(0,1fr)_auto]">
+                <select
+                  aria-label="Campo"
+                  className={selectClass}
+                  value={c.field}
+                  onChange={(e) => updateCondition(i, { field: e.target.value })}
+                >
+                  {DELIVERY_RULE_FIELDS.map((f) => (
+                    <option key={f.key} value={f.key}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Operatore"
+                  className={selectClass}
+                  value={c.operator}
+                  onChange={(e) => updateCondition(i, { operator: e.target.value as DeliveryRuleCondition["operator"] })}
+                >
+                  {DELIVERY_RULE_OPERATORS.map((o) => (
+                    <option key={o.key} value={o.key}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  aria-label="Valore"
+                  placeholder="valore"
+                  className={inputClass}
+                  value={c.value}
+                  onChange={(e) => updateCondition(i, { value: e.target.value })}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Rimuovi la condizione"
+                  onClick={() => setConditions((cs) => cs.filter((_, idx) => idx !== i))}
+                  className="hover:text-destructive-fg"
+                >
+                  <X weight="bold" />
+                </Button>
+              </div>
+            ))}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className={conditions.length > 0 ? "mt-3" : undefined}
+            onClick={() => setConditions((cs) => [...cs, emptyCondition()])}
+          >
+            <Plus weight="bold" aria-hidden />
+            Aggiungi condizione
+          </Button>
+        </Block>
+      </div>
+
+      <div hidden={tab !== "webhook"}>
+        <Block
+          title="Webhook di questa lista"
+          description="Si configura solo qui, per lista: nessun default globale né override per ricerca."
+        >
+          <div className="grid gap-4">
+            <Field label="URL del webhook">
+              <Input
+                type="text"
+                placeholder="https://crm.tuodominio.com/api/webhooks/lead-scraper"
+                className="font-mono text-[13px]"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+              />
+            </Field>
+            <Field
+              label="Shared secret"
+              hint={initialHasWebhookSecret ? "Già impostato: lascia vuoto per non cambiarlo." : undefined}
             >
-              {f.label}
-            </button>
-          ))}
-          {attributes.map((a) => (
-            <button
-              key={a.key}
-              type="button"
-              onClick={() => toggleOutboundField(a.key)}
-              className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
-                outboundFields.includes(a.key)
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-background text-muted-foreground"
-              }`}
-            >
-              {a.name}
-            </button>
-          ))}
+              <Input
+                type="password"
+                autoComplete="off"
+                placeholder={initialHasWebhookSecret ? "••••••••" : "Shared secret"}
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+              />
+            </Field>
+            <div>
+              <div className="text-[13px] font-medium">Campi da inviare nel payload</div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {outboundFields.length === 0 ? "Nessuno selezionato: viene inviato il payload completo." : `${outboundFields.length} selezionati.`}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {FIXED_PLACE_FIELDS.map((f) => (
+                  <ChipToggle key={f.key} active={outboundFields.includes(f.key)} onClick={() => toggleOutboundField(f.key)}>
+                    {f.label}
+                  </ChipToggle>
+                ))}
+                {attributes.map((a) => (
+                  <ChipToggle key={a.key} active={outboundFields.includes(a.key)} onClick={() => toggleOutboundField(a.key)}>
+                    {a.name}
+                  </ChipToggle>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Block>
+      </div>
+
+      {showSave && (
+        <div className="sticky bottom-0 -mx-6 -mb-6 mt-auto flex items-center justify-between gap-3 border-t border-border bg-background/90 px-6 py-3.5 backdrop-blur">
+          <p className="text-xs text-muted-foreground">Le modifiche di queste schede si applicano con «Salva».</p>
+          <Button loading={saving} onClick={save}>
+            Salva
+          </Button>
         </div>
-      </SectionCard>
-
-      <button
-        type="button"
-        onClick={save}
-        className={`h-9 rounded-md px-4 text-[13px] font-semibold ${
-          saved ? "bg-success/10 text-success" : "bg-primary text-primary-foreground"
-        }`}
-      >
-        {saved ? "Salvato ✓" : "Salva"}
-      </button>
-    </div>
+      )}
+    </>
   );
 }
 
@@ -366,11 +438,13 @@ export function AttributesPanel({
   outboundFields: string[] | null;
   onChanged: () => void;
 }) {
+  const confirm = useConfirm();
+  const [tab, setTab] = useState<TabKey>("colonne");
   const [name, setName] = useState("");
   const [type, setType] = useState<string>("text");
 
   const allFields = [
-    ...FIXED_PLACE_FIELDS.map((f) => ({ key: f.key, label: f.label })),
+    ...FIXED_PLACE_FIELDS.map((f) => ({ key: f.key as string, label: f.label as string })),
     ...attributes.map((a) => ({ key: a.key, label: a.name })),
   ];
 
@@ -386,15 +460,20 @@ export function AttributesPanel({
     onChanged();
   }
 
-  async function deleteAttribute(attrId: string) {
-    await fetch(`/api/lists/${listId}/attributes/${attrId}`, { method: "DELETE" });
+  async function deleteAttribute(a: ListAttribute) {
+    const ok = await confirm({
+      title: `Eliminare il campo "${a.name}"?`,
+      description: "I valori già salvati in questo campo andranno persi.",
+      confirmLabel: "Elimina campo",
+      tone: "danger",
+    });
+    if (!ok) return;
+    await fetch(`/api/lists/${listId}/attributes/${a.id}`, { method: "DELETE" });
     onChanged();
   }
 
   async function toggleVisible(key: string) {
-    const next = visibleFields.includes(key)
-      ? visibleFields.filter((k) => k !== key)
-      : [...visibleFields, key];
+    const next = visibleFields.includes(key) ? visibleFields.filter((k) => k !== key) : [...visibleFields, key];
     await fetch(`/api/lists/${listId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -404,95 +483,112 @@ export function AttributesPanel({
   }
 
   return (
-    <div className="mb-5 rounded-xl border border-border bg-muted p-5">
-      <SectionCard
-        title="Colonne mostrate in tabella"
-        description="Scegli quali campi (fissi o personalizzati) compaiono come colonne nella tabella della lista."
-      >
-        <div className="flex flex-wrap gap-2">
-          {allFields.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => toggleVisible(f.key)}
-              className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
-                visibleFields.includes(f.key)
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-background text-muted-foreground"
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </SectionCard>
+    <div className="flex min-h-full flex-col">
+      <div className="sticky top-0 z-10 bg-background px-6 pt-2">
+        <Tabs<TabKey>
+          label="Sezioni di configurazione"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { value: "colonne", label: "Colonne", hint: "auto" },
+            { value: "campi", label: "Campi", hint: "auto" },
+            { value: "ai", label: "Analisi AI" },
+            { value: "filtri", label: "Filtri" },
+            { value: "webhook", label: "Webhook" },
+          ]}
+        />
+      </div>
 
-      <SectionCard title="Campi personalizzati di questa lista">
-        <div className="mb-3 flex flex-col gap-2">
-          {attributes.length === 0 && (
-            <div className="text-xs text-muted-soft">Nessun campo custom ancora</div>
-          )}
-          {attributes.map((a) => (
-            <div
-              key={a.id}
-              className="flex items-center justify-between rounded-md border border-border bg-background px-3.5 py-2.5"
-            >
-              <span>
-                <span className="text-[13px] font-medium">{a.name}</span>
-                <span className="ml-2 font-mono text-xs text-muted-soft">{a.key}</span>
-              </span>
-              <span className="flex items-center gap-2.5">
-                <span className="text-xs text-muted-foreground">{a.type}</span>
-                <button className="text-xs text-destructive" onClick={() => deleteAttribute(a.id)}>
-                  Elimina
-                </button>
-              </span>
+      <div className="flex flex-1 flex-col px-6 pb-6 pt-6">
+        <div hidden={tab !== "colonne"}>
+          <Block
+            title="Colonne mostrate in tabella"
+            description="Scegli quali campi (fissi o personalizzati) compaiono come colonne nella tabella della lista. Si applica subito."
+          >
+            <div className="flex flex-wrap gap-2">
+              {allFields.map((f) => (
+                <ChipToggle key={f.key} active={visibleFields.includes(f.key)} onClick={() => toggleVisible(f.key)}>
+                  {f.label}
+                </ChipToggle>
+              ))}
             </div>
-          ))}
+          </Block>
         </div>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="Nome campo custom"
-            className={`${inputClass} flex-1 bg-background`}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <select
-            className={selectClass}
-            style={{ width: 110 }}
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-          >
-            {ATTR_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={addAttribute}
-            className="rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground"
-          >
-            Aggiungi
-          </button>
-        </div>
-      </SectionCard>
 
-      <DeliveryFilterSection
-        listId={listId}
-        initialRules={deliveryRules}
-        initialChainThreshold={excludeChainsThreshold}
-        initialAiEnabled={aiAnalysisEnabled}
-        initialAiPromptMd={aiPromptMd}
-        initialAiVisionEnabled={aiVisionEnabled}
-        initialWebhookUrl={outboundWebhookUrl}
-        initialHasWebhookSecret={hasOutboundWebhookSecret}
-        initialOutboundFields={outboundFields}
-        attributes={attributes}
-        onChanged={onChanged}
-      />
+        <div hidden={tab !== "campi"}>
+          <Block
+            title="Campi personalizzati"
+            description="Campi extra di questa lista, compilabili a mano o dall'analisi AI. Si applica subito."
+          >
+            {attributes.length === 0 ? (
+              <p className="mb-4 text-[13px] text-muted-soft">Nessun campo personalizzato ancora.</p>
+            ) : (
+              <ul className="mb-4 grid gap-1.5">
+                {attributes.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-center justify-between rounded-md border border-border bg-card py-1.5 pl-3.5 pr-1.5"
+                  >
+                    <span className="min-w-0 truncate">
+                      <span className="text-[13px] font-medium">{a.name}</span>
+                      <span className="ml-2 font-mono text-xs text-muted-soft">{a.key}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <span className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">{a.type}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Elimina il campo ${a.name}`}
+                        onClick={() => deleteAttribute(a)}
+                        className="hover:text-destructive-fg"
+                      >
+                        <Trash />
+                      </Button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                aria-label="Nome del nuovo campo"
+                placeholder="Nome campo"
+                className={cn(inputClass, "flex-1")}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addAttribute()}
+              />
+              <Select aria-label="Tipo del campo" className="w-28" value={type} onChange={(e) => setType(e.target.value)}>
+                {ATTR_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+              <Button variant="outline" onClick={addAttribute} disabled={!name.trim()}>
+                <Plus weight="bold" aria-hidden />
+                Aggiungi
+              </Button>
+            </div>
+          </Block>
+        </div>
+
+        <DeliveryFilterSection
+          tab={tab}
+          listId={listId}
+          initialRules={deliveryRules}
+          initialChainThreshold={excludeChainsThreshold}
+          initialAiEnabled={aiAnalysisEnabled}
+          initialAiPromptMd={aiPromptMd}
+          initialAiVisionEnabled={aiVisionEnabled}
+          initialWebhookUrl={outboundWebhookUrl}
+          initialHasWebhookSecret={hasOutboundWebhookSecret}
+          initialOutboundFields={outboundFields}
+          attributes={attributes}
+          onChanged={onChanged}
+        />
+      </div>
     </div>
   );
 }

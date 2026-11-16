@@ -5,11 +5,12 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-heading: var(--font-sans);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
-  --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -27,6 +28,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-fg: var(--destructive-fg);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -42,105 +44,388 @@
   --color-hairline-soft: var(--hairline-soft);
   --color-muted-soft: var(--muted-soft);
   --color-success: var(--success);
+  --color-success-fg: var(--success-fg);
   --color-warning: var(--warning);
+  --color-warning-fg: var(--warning-fg);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-soft: var(--brand-soft);
+
+  /* Forma: controlli 8px, pannelli 12px, badge 6px. Una sola scala, ovunque. */
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-xl: 12px;
   --radius-2xl: 16px;
   --radius-3xl: 16px;
   --radius-4xl: 16px;
+
+  /* Ombre tinte sul tono di fondo (mai nero puro). */
+  --shadow-panel: 0 1px 2px oklch(0.25 0.03 262 / 0.05), 0 0 0 1px oklch(0.25 0.03 262 / 0.015);
+  --shadow-pop: 0 12px 32px -8px oklch(0.25 0.04 262 / 0.22), 0 2px 6px oklch(0.25 0.04 262 / 0.08);
 }
 
-/* Design tokens presi 1:1 da Lead Scraper.dc.html (handoff Claude Design) — non da shadcn default. */
+/*
+ * Palette: grigi freddi tinti (tinta 262) + UN solo accento (cobalto desaturato, --brand).
+ * Verde/ambra/rosso sono colori di stato, non di marca: compaiono solo per significare qualcosa.
+ * Per cambiare il carattere dell'app basta toccare --brand (e la sua versione dark).
+ */
 :root {
-  --background: #ffffff; /* canvas */
-  --foreground: #111111; /* ink */
-  --card: #ffffff;
-  --card-foreground: #111111;
-  --popover: #ffffff;
-  --popover-foreground: #111111;
-  --primary: #111111;
-  --primary-foreground: #ffffff;
-  --secondary: #f5f5f5; /* surface-card */
-  --secondary-foreground: #111111;
-  --muted: #f8f9fa; /* surface-soft */
-  --muted-foreground: #6b7280; /* body/secondary text */
-  --accent: #f5f5f5; /* surface-card */
-  --accent-foreground: #111111;
-  --destructive: #ef4444;
-  --border: #e5e7eb; /* hairline */
-  --input: #e5e7eb;
-  --ring: #111111;
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 12px;
-  --sidebar: #ffffff;
-  --sidebar-foreground: #111111;
-  --sidebar-primary: #111111;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f5f5f5;
-  --sidebar-accent-foreground: #111111;
-  --sidebar-border: #e5e7eb;
-  --sidebar-ring: #111111;
+  color-scheme: light;
+  --background: oklch(0.982 0.003 262);
+  --foreground: oklch(0.2 0.013 262);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.013 262);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.013 262);
+  --primary: oklch(0.2 0.013 262);
+  --primary-foreground: oklch(0.985 0.003 262);
+  --secondary: oklch(0.953 0.004 262);
+  --secondary-foreground: oklch(0.2 0.013 262);
+  --muted: oklch(0.965 0.004 262);
+  --muted-foreground: oklch(0.47 0.013 262);
+  --muted-soft: oklch(0.54 0.012 262);
+  --accent: oklch(0.953 0.004 262);
+  --accent-foreground: oklch(0.2 0.013 262);
+  --border: oklch(0.915 0.005 262);
+  --hairline-soft: oklch(0.945 0.004 262);
+  --input: oklch(0.87 0.007 262);
+  --ring: oklch(0.53 0.17 262);
 
-  /* Token aggiuntivi del mockup senza equivalente diretto nella palette shadcn */
-  --hairline-soft: #f3f4f6;
-  --muted-soft: #898989;
-  --success: #10b981;
-  --warning: #f59e0b;
+  --brand: oklch(0.53 0.17 262);
+  --brand-foreground: oklch(0.99 0 0);
+  --brand-soft: oklch(0.955 0.03 262);
+
+  --destructive: oklch(0.58 0.2 25);
+  --destructive-fg: oklch(0.47 0.17 25);
+  --success: oklch(0.6 0.14 160);
+  --success-fg: oklch(0.42 0.1 160);
+  --warning: oklch(0.74 0.15 75);
+  --warning-fg: oklch(0.46 0.1 65);
+
+  --chart-1: oklch(0.87 0.005 262);
+  --chart-2: oklch(0.56 0.01 262);
+  --chart-3: oklch(0.44 0.01 262);
+  --chart-4: oklch(0.37 0.01 262);
+  --chart-5: oklch(0.27 0.01 262);
+  --radius: 12px;
+
+  --sidebar: oklch(0.972 0.004 262);
+  --sidebar-foreground: oklch(0.2 0.013 262);
+  --sidebar-primary: oklch(0.2 0.013 262);
+  --sidebar-primary-foreground: oklch(0.985 0.003 262);
+  --sidebar-accent: oklch(0.94 0.005 262);
+  --sidebar-accent-foreground: oklch(0.2 0.013 262);
+  --sidebar-border: oklch(0.915 0.005 262);
+  --sidebar-ring: oklch(0.53 0.17 262);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: dark;
+  --background: oklch(0.165 0.007 262);
+  --foreground: oklch(0.955 0.004 262);
+  --card: oklch(0.2 0.008 262);
+  --card-foreground: oklch(0.955 0.004 262);
+  --popover: oklch(0.22 0.009 262);
+  --popover-foreground: oklch(0.955 0.004 262);
+  --primary: oklch(0.955 0.004 262);
+  --primary-foreground: oklch(0.2 0.013 262);
+  --secondary: oklch(0.255 0.009 262);
+  --secondary-foreground: oklch(0.955 0.004 262);
+  --muted: oklch(0.235 0.008 262);
+  --muted-foreground: oklch(0.72 0.01 262);
+  --muted-soft: oklch(0.64 0.01 262);
+  --accent: oklch(0.265 0.009 262);
+  --accent-foreground: oklch(0.955 0.004 262);
+  --border: oklch(1 0 0 / 0.09);
+  --hairline-soft: oklch(1 0 0 / 0.06);
+  --input: oklch(1 0 0 / 0.16);
+  --ring: oklch(0.72 0.14 262);
+
+  --brand: oklch(0.72 0.14 262);
+  --brand-foreground: oklch(0.18 0.02 262);
+  --brand-soft: oklch(0.3 0.05 262);
+
+  --destructive: oklch(0.68 0.19 25);
+  --destructive-fg: oklch(0.8 0.12 25);
+  --success: oklch(0.72 0.15 160);
+  --success-fg: oklch(0.82 0.11 160);
+  --warning: oklch(0.8 0.15 80);
+  --warning-fg: oklch(0.86 0.1 80);
+
+  --chart-1: oklch(0.87 0.005 262);
+  --chart-2: oklch(0.56 0.01 262);
+  --chart-3: oklch(0.44 0.01 262);
+  --chart-4: oklch(0.37 0.01 262);
+  --chart-5: oklch(0.27 0.01 262);
+
+  --sidebar: oklch(0.185 0.008 262);
+  --sidebar-foreground: oklch(0.955 0.004 262);
+  --sidebar-primary: oklch(0.955 0.004 262);
+  --sidebar-primary-foreground: oklch(0.2 0.013 262);
+  --sidebar-accent: oklch(0.255 0.009 262);
+  --sidebar-accent-foreground: oklch(0.955 0.004 262);
+  --sidebar-border: oklch(1 0 0 / 0.09);
+  --sidebar-ring: oklch(0.72 0.14 262);
+
+  --shadow-panel: 0 1px 2px oklch(0 0 0 / 0.3), 0 0 0 1px oklch(1 0 0 / 0.02);
+  --shadow-pop: 0 16px 40px -8px oklch(0 0 0 / 0.55), 0 2px 6px oklch(0 0 0 / 0.3);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
     @apply font-sans;
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
   }
-  /* Tailwind v4 azzera il cursore pointer di default sui bottoni — lo ripristiniamo
-     globalmente invece di aggiungerlo manualmente ad ogni className. */
-  button:not(:disabled) {
+  body {
+    @apply bg-background text-foreground;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  /* Colonna implicita che può restringersi: evita che un figlio largo (tabella, mappa)
+     allarghi l'intera pagina su mobile. Le utility grid-cols-* continuano a prevalere. */
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  /* Tailwind v4 azzera il cursore pointer di default sui bottoni — lo ripristiniamo. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary {
     cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--brand) 22%, transparent);
+  }
+  input[type="checkbox"] {
+    accent-color: var(--brand);
+    width: 16px;
+    height: 16px;
+  }
+}
+
+@layer utilities {
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* Ingresso a cascata: solo opacity + translate (GPU), mai su larghezze o altezze. */
+  .rise {
+    animation: rise 380ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation-delay: calc(var(--i, 0) * 50ms);
+  }
+
+  .select-chevron {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 256 256' fill='none' stroke='%238a8d98' stroke-width='20' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m208 96-80 80-80-80'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 32px;
+  }
+
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent) transparent;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Con un dialog aperto la pagina sotto non scorre. */
+body:has(dialog[open]) {
+  overflow: hidden;
+}
+
+/* Dialog nativi (Drawer + Conferma): focus trap ed Escape gratis dal browser. */
+dialog.sheet {
+  margin: 0 0 0 auto;
+  height: 100dvh;
+  max-height: 100dvh;
+  max-width: 100vw;
+  padding: 0;
+  border: 0;
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: var(--shadow-pop);
+}
+dialog.sheet[open] {
+  animation: drawer-in 260ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+dialog.sheet::backdrop,
+dialog.modal::backdrop {
+  background: oklch(0.15 0.02 262 / 0.42);
+  backdrop-filter: blur(2px);
+}
+dialog[open]::backdrop {
+  animation: fade-in 200ms ease both;
+}
+dialog.modal {
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-pop);
+  max-width: min(440px, calc(100vw - 32px));
+  width: 100%;
+}
+dialog.modal[open] {
+  animation: pop-in 200ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Leaflet: stessa famiglia visiva dell'app. Le tile OSM vengono desaturate via CSS (stessi
+   tile, nessun cambio di provider/licenza) e invertite in dark mode. */
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: var(--muted);
+  outline-offset: 0;
+}
+.leaflet-container .leaflet-tile-pane {
+  filter: grayscale(0.82) contrast(0.94) brightness(1.04);
+}
+.dark .leaflet-container .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) grayscale(0.55) brightness(0.92) contrast(0.95);
+}
+.leaflet-container a {
+  color: var(--brand);
+}
+.leaflet-bar {
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--shadow-panel) !important;
+  overflow: hidden;
+}
+.leaflet-bar a {
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+  border-bottom-color: var(--border) !important;
+  width: 30px !important;
+  height: 30px !important;
+  line-height: 30px !important;
+}
+.leaflet-bar a:hover {
+  background: var(--muted) !important;
+}
+.leaflet-control-attribution {
+  background: color-mix(in oklch, var(--card) 80%, transparent) !important;
+  color: var(--muted-foreground) !important;
+  font-size: 10px !important;
+  border-radius: 6px 0 0 0;
+}
+.leaflet-tooltip {
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-pop);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.leaflet-tooltip-top:before {
+  border-top-color: var(--border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .rise,
+  dialog.sheet[open],
+  dialog.modal[open],
+  dialog[open]::backdrop {
+    animation: none !important;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Pannello laterale ancorato a sinistra (menu mobile). */
+dialog.sheet.sheet-left {
+  margin: 0 auto 0 0;
+}
+dialog.sheet.sheet-left[open] {
+  animation-name: drawer-in-left;
+}
+@keyframes drawer-in-left {
+  from {
+    transform: translateX(-24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
   }
 }

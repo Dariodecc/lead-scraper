@@ -10,11 +10,27 @@ export interface MapCircleData {
   lng: number;
   radiusM: number;
   label: string;
+  /** Nome di un token del tema ("brand", "success", "warning", "muted", "danger") oppure un colore CSS. */
   color?: string;
   href?: string;
 }
 
-const DEFAULT_COLOR = "#2563eb";
+const TOKENS: Record<string, string> = {
+  brand: "--brand",
+  success: "--success",
+  warning: "--warning",
+  muted: "--muted-foreground",
+  danger: "--destructive",
+};
+
+// Leaflet scrive il colore come attributo SVG, dove var(--x) non si risolve: leggiamo il valore
+// calcolato del token al momento del disegno (e ridisegniamo quando cambia il tema).
+function resolveColor(color: string | undefined): string {
+  const name = TOKENS[color ?? "brand"];
+  if (!name) return color ?? "#3b5fcf";
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#3b5fcf";
+}
+
 // Centro geografico approssimativo dell'Italia — vista di default quando non c'è ancora
 // nessuna zona da mostrare.
 const ITALY_CENTER: [number, number] = [42.5, 12.5];
@@ -25,13 +41,18 @@ const ITALY_CENTER: [number, number] = [42.5, 12.5];
  * un cerchio per ogni zona di ricerca: è un'approssimazione del confine reale del comune (Google
  * non espone poligoni via API pubblica), utile per verificare a colpo d'occhio se la copertura
  * scelta ha senso, non un confine amministrativo esatto.
+ *
+ * Lo stile delle tile (desaturate / invertite in dark mode) è in globals.css.
  */
 export function CoverageMap({
   circles,
   height = 280,
+  focusId,
 }: {
   circles: MapCircleData[];
-  height?: number;
+  height?: number | string;
+  /** Se presente, la vista si sposta su questo cerchio e lo evidenzia. */
+  focusId?: string | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletNS.Map | null>(null);
@@ -40,9 +61,12 @@ export function CoverageMap({
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const circlesRef = useRef(circles);
   circlesRef.current = circles;
+  const focusRef = useRef(focusId);
+  focusRef.current = focusId;
 
   useEffect(() => {
     let cancelled = false;
+    let themeObserver: MutationObserver | null = null;
 
     (async () => {
       const L = (await import("leaflet")).default;
@@ -66,6 +90,10 @@ export function CoverageMap({
       resizeObserver.observe(containerRef.current);
       resizeObserverRef.current = resizeObserver;
 
+      // Cambio tema: i colori dei token cambiano, quindi si ridisegna.
+      themeObserver = new MutationObserver(() => drawCircles(false));
+      themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+
       requestAnimationFrame(() => {
         if (cancelled) return;
         map.invalidateSize();
@@ -75,6 +103,7 @@ export function CoverageMap({
 
     return () => {
       cancelled = true;
+      themeObserver?.disconnect();
       resizeObserverRef.current?.disconnect();
       resizeObserverRef.current = null;
       mapRef.current?.remove();
@@ -83,7 +112,7 @@ export function CoverageMap({
     };
   }, []);
 
-  function drawCircles() {
+  function drawCircles(refit = true) {
     const L = leafletRef.current;
     const map = mapRef.current;
     const group = layerGroupRef.current;
@@ -93,18 +122,23 @@ export function CoverageMap({
 
     const current = circlesRef.current;
     if (current.length === 0) {
-      map.setView(ITALY_CENTER, 5);
+      if (refit) map.setView(ITALY_CENTER, 5);
       return;
     }
 
+    const focusedId = focusRef.current;
     const bounds = L.latLngBounds(current.map((c) => [c.lat, c.lng] as [number, number]));
+    let focusBounds: LeafletNS.LatLngBounds | null = null;
+
     for (const c of current) {
+      const color = resolveColor(c.color);
+      const isFocus = focusedId === c.id;
       const circle = L.circle([c.lat, c.lng], {
         radius: c.radiusM,
-        color: c.color ?? DEFAULT_COLOR,
-        fillColor: c.color ?? DEFAULT_COLOR,
-        fillOpacity: 0.12,
-        weight: 2,
+        color,
+        fillColor: color,
+        fillOpacity: isFocus ? 0.26 : 0.13,
+        weight: isFocus ? 3 : 1.5,
       });
       circle.bindTooltip(c.label, { direction: "top", sticky: true });
       if (c.href) {
@@ -116,14 +150,26 @@ export function CoverageMap({
         circle.on("mouseout", () => map.getContainer().style.removeProperty("cursor"));
       }
       circle.addTo(group);
+      if (isFocus) focusBounds = circle.getBounds();
     }
-    map.fitBounds(bounds.pad(0.35), { maxZoom: 13 });
+
+    if (!refit) return;
+    if (focusBounds) map.flyToBounds(focusBounds.pad(0.4), { maxZoom: 12, duration: 0.6 });
+    else map.fitBounds(bounds.pad(0.35), { maxZoom: 13 });
   }
 
   useEffect(() => {
     drawCircles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(circles)]);
+  }, [JSON.stringify(circles), focusId]);
 
-  return <div ref={containerRef} style={{ height }} className="w-full rounded-lg border border-border" />;
+  return (
+    <div
+      ref={containerRef}
+      role="region"
+      aria-label="Mappa della copertura delle ricerche"
+      style={{ height }}
+      className="w-full overflow-hidden rounded-lg border border-border shadow-panel"
+    />
+  );
 }

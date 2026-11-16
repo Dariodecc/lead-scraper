@@ -1,22 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ArrowsClockwise, Pulse } from "@phosphor-icons/react";
+import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/field";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Pagination } from "@/components/ui/pagination";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { LevelBadge, LOG_CATEGORY_LABEL } from "@/components/status-badges";
+import { useToast } from "@/components/ui/toast";
+import { formatDateTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
-const COLUMNS = ["Livello", "Categoria", "Messaggio", "Ricerca", "Costo", "Data", "Azione"] as const;
-
-const LEVEL_LABEL: Record<string, string> = { info: "Info", warning: "Warning", error: "Error" };
-const CATEGORY_LABEL: Record<string, string> = {
-  search_run: "Esecuzione ricerca",
-  google_api: "Google API",
-  webhook_delivery: "Consegna webhook",
-  ai_analysis: "Analisi AI",
-  system: "Sistema",
-};
-const LEVEL_STYLE: Record<string, string> = {
-  info: "bg-muted text-muted-foreground",
-  warning: "bg-warning/10 text-warning",
-  error: "bg-destructive/10 text-destructive",
-};
 const RETRYABLE_CATEGORIES = new Set(["webhook_delivery", "ai_analysis"]);
 
 interface LogRow {
@@ -31,10 +28,13 @@ interface LogRow {
 }
 
 export default function LogsPage() {
+  const toast = useToast();
   const [logs, setLogs] = useState<LogRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [level, setLevel] = useState("all");
   const [category, setCategory] = useState("all");
   const [retrying, setRetrying] = useState<Record<string, boolean>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
@@ -50,6 +50,7 @@ export default function LogsPage() {
     setLogs(data.logs ?? []);
     setTotalPages(data.totalPages ?? 1);
     setTotal(data.total ?? 0);
+    setLoading(false);
   }, [level, category, page]);
 
   useEffect(() => {
@@ -61,124 +62,164 @@ export default function LogsPage() {
     if (!log.placeId) return;
     setRetrying((r) => ({ ...r, [log.id]: true }));
     try {
-      await fetch(`/api/places/${log.placeId}/redeliver`, { method: "POST" });
-      setTimeout(load, 1500);
+      const res = await fetch(`/api/places/${log.placeId}/redeliver`, { method: "POST" });
+      if (res.ok) {
+        toast({ title: "Riprova accodata", description: "L'esito comparirà qui tra qualche secondo.", tone: "success" });
+        setTimeout(load, 1500);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast({ title: "Riprova non riuscita", description: data.error, tone: "danger" });
+      }
     } finally {
       setRetrying((r) => ({ ...r, [log.id]: false }));
     }
   }
 
-  return (
-    <div className="px-12 pb-12 pt-10">
-      <div className="mb-6">
-        <h1 className="mb-1.5 text-[28px] font-semibold tracking-tight">Logs</h1>
-        <p className="text-sm text-muted-foreground">
-          Esecuzioni ricerche, chiamate Google Places, analisi AI, consegne webhook, errori di sistema
-        </p>
-      </div>
+  function toggleExpanded(id: string) {
+    setExpanded((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
-      <div className="mb-5 flex gap-3">
-        <select
-          className="h-10 rounded-md border border-border bg-background px-3 text-sm"
+  const filtered = level !== "all" || category !== "all";
+
+  return (
+    <>
+      <PageHeader
+        title="Logs"
+        description="Esecuzioni delle ricerche, chiamate a Google Places, analisi AI, consegne webhook ed errori di sistema."
+      />
+
+      <div className="rise mb-4 flex flex-wrap items-center gap-3" style={{ "--i": 1 } as React.CSSProperties}>
+        <Select
+          aria-label="Filtra per livello"
+          className="w-44"
           value={level}
           onChange={(e) => {
             setLevel(e.target.value);
             setPage(1);
           }}
         >
-          <option value="all">Livello — tutti</option>
+          <option value="all">Livello: tutti</option>
           <option value="info">Info</option>
           <option value="warning">Warning</option>
-          <option value="error">Error</option>
-        </select>
-        <select
-          className="h-10 rounded-md border border-border bg-background px-3 text-sm"
+          <option value="error">Errore</option>
+        </Select>
+        <Select
+          aria-label="Filtra per categoria"
+          className="w-52"
           value={category}
           onChange={(e) => {
             setCategory(e.target.value);
             setPage(1);
           }}
         >
-          <option value="all">Categoria — tutte</option>
-          <option value="search_run">Esecuzione ricerca</option>
-          <option value="google_api">Google API</option>
-          <option value="ai_analysis">Analisi AI</option>
-          <option value="webhook_delivery">Consegna webhook</option>
-          <option value="system">Sistema</option>
-        </select>
+          <option value="all">Categoria: tutte</option>
+          {Object.entries(LOG_CATEGORY_LABEL).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </Select>
+        {filtered && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setLevel("all");
+              setCategory("all");
+              setPage(1);
+            }}
+          >
+            Azzera filtri
+          </Button>
+        )}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-border">
-        <div style={{ minWidth: 900 }}>
-          <div className="grid grid-cols-[0.8fr_1.1fr_2fr_1.1fr_0.8fr_1.3fr_1fr] gap-x-4 border-b border-border bg-muted px-5 py-3">
-            {COLUMNS.map((col) => (
-              <span key={col} className="min-w-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {col}
-              </span>
-            ))}
-          </div>
-
-          {logs.length === 0 && (
-            <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-              Nessun log ancora — comparirà qui alla prima esecuzione di una ricerca.
-            </div>
-          )}
-
-          {logs.map((log) => (
-            <div
-              key={log.id}
-              className="grid grid-cols-[0.8fr_1.1fr_2fr_1.1fr_0.8fr_1.3fr_1fr] items-center gap-x-4 border-b border-hairline-soft px-5 py-3.5"
-            >
-              <span className={`min-w-0 w-fit rounded-full px-3 py-0.5 text-xs font-medium ${LEVEL_STYLE[log.level]}`}>
-                {LEVEL_LABEL[log.level]}
-              </span>
-              <span className="min-w-0 truncate text-[13px]">{CATEGORY_LABEL[log.category] ?? log.category}</span>
-              <span className="min-w-0 truncate font-mono text-[13px]" title={log.message}>
-                {log.message}
-              </span>
-              <span className="min-w-0 truncate text-[13px] text-muted-foreground">{log.search?.title ?? "—"}</span>
-              <span className="min-w-0 text-[13px] text-muted-foreground">
-                {log.costUsd != null ? `$${Number(log.costUsd).toFixed(4)}` : "—"}
-              </span>
-              <span className="min-w-0 text-xs text-muted-soft">{new Date(log.createdAt).toLocaleString("it-IT")}</span>
-              {RETRYABLE_CATEGORIES.has(log.category) && log.level === "error" && log.placeId ? (
-                <button
-                  disabled={retrying[log.id]}
-                  onClick={() => retry(log)}
-                  className="w-fit rounded-md bg-primary px-3.5 py-1.5 text-[13px] font-semibold text-primary-foreground disabled:opacity-60"
-                >
-                  {retrying[log.id] ? "In coda…" : "Riprova adesso"}
-                </button>
-              ) : (
-                <span />
-              )}
-            </div>
+      {loading ? (
+        <div role="status" aria-label="Caricamento" className="grid gap-2 rounded-lg border border-border bg-card p-4 shadow-panel">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-10 w-full" />
           ))}
         </div>
-      </div>
-
-      <div className="mt-4 flex items-center justify-between text-[13px] text-muted-foreground">
-        <span>{total} log totali</span>
-        <div className="flex items-center gap-3">
-          <button
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="rounded-md border border-border px-3 py-1.5 disabled:opacity-40"
-          >
-            ← Precedente
-          </button>
-          <span>
-            Pagina {page} di {totalPages}
-          </span>
-          <button
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            className="rounded-md border border-border px-3 py-1.5 disabled:opacity-40"
-          >
-            Successiva →
-          </button>
+      ) : logs.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-input bg-card">
+          <EmptyState
+            icon={Pulse}
+            title={filtered ? "Nessun log con questi filtri" : "Nessun log ancora"}
+            description={
+              filtered
+                ? "Prova ad allargare livello o categoria."
+                : "Comparirà qui alla prima esecuzione di una ricerca."
+            }
+          />
         </div>
-      </div>
-    </div>
+      ) : (
+        <div className="rise" style={{ "--i": 2 } as React.CSSProperties}>
+          <Table minWidth={900}>
+            <thead>
+              <tr>
+                <Th>Livello</Th>
+                <Th>Categoria</Th>
+                <Th>Messaggio</Th>
+                <Th>Ricerca</Th>
+                <Th className="text-right">Costo</Th>
+                <Th>Data</Th>
+                <Th>
+                  <span className="sr-only">Azione</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((log) => {
+                const open = expanded.has(log.id);
+                const canRetry = RETRYABLE_CATEGORIES.has(log.category) && log.level === "error" && log.placeId;
+                return (
+                  <Tr key={log.id} className="align-top">
+                    <Td>
+                      <LevelBadge level={log.level} />
+                    </Td>
+                    <Td className="whitespace-nowrap text-muted-foreground">{LOG_CATEGORY_LABEL[log.category] ?? log.category}</Td>
+                    <Td className="max-w-[420px]">
+                      <button
+                        type="button"
+                        aria-expanded={open}
+                        onClick={() => toggleExpanded(log.id)}
+                        title={open ? "Comprimi" : "Mostra il messaggio intero"}
+                        className={cn(
+                          "block w-full break-words rounded-sm text-left font-mono text-xs leading-relaxed text-foreground/85 transition-colors hover:text-foreground",
+                          !open && "line-clamp-2",
+                        )}
+                      >
+                        {log.message}
+                      </button>
+                    </Td>
+                    <Td className="max-w-[180px] truncate text-muted-foreground" title={log.search?.title}>
+                      {log.search?.title ?? "—"}
+                    </Td>
+                    <Td className="num text-right text-muted-foreground">
+                      {log.costUsd != null ? `$${Number(log.costUsd).toFixed(4)}` : "—"}
+                    </Td>
+                    <Td className="num whitespace-nowrap text-xs text-muted-soft">{formatDateTime(log.createdAt)}</Td>
+                    <Td>
+                      {canRetry && (
+                        <Button size="sm" variant="outline" loading={retrying[log.id]} onClick={() => retry(log)}>
+                          {!retrying[log.id] && <ArrowsClockwise aria-hidden />}
+                          Riprova
+                        </Button>
+                      )}
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </Table>
+          <Pagination page={page} totalPages={totalPages} total={total} noun="log totali" onPage={setPage} />
+        </div>
+      )}
+    </>
   );
 }

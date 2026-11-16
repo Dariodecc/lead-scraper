@@ -1,15 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Field, inputClass, selectClass } from "@/components/ui/field";
+import { Flask, Info, Pause, Play } from "@phosphor-icons/react";
+import { Field, Input, Select } from "@/components/ui/field";
 import { AreaAutocomplete, type AreaValue } from "@/components/ricerche/area-autocomplete";
 import { PLACE_TYPES } from "@/lib/placeTypes";
+import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
+import { Panel, PanelBody, PanelHeader } from "@/components/ui/panel";
+import { Segmented } from "@/components/ui/segmented";
+import { PageSkeleton } from "@/components/ui/skeleton";
+import { SearchStatusBadge, RunStatusBadge } from "@/components/status-badges";
+import { useToast } from "@/components/ui/toast";
+import { formatDateTime, formatUsd } from "@/lib/format";
 
 // Leaflet tocca `window` — niente SSR, si carica solo lato client dopo il mount.
 const CoverageMap = dynamic(() => import("@/components/map/coverage-map").then((m) => m.CoverageMap), {
   ssr: false,
+  loading: () => <div className="h-80 animate-pulse rounded-lg bg-muted" aria-hidden />,
 });
 
 const WEEKDAYS = [
@@ -22,12 +33,7 @@ const WEEKDAYS = [
   { id: 0, label: "Domenica" },
 ];
 
-const STATUS_LABEL: Record<string, string> = { draft: "Bozza", active: "Attiva", paused: "In pausa" };
-const STATUS_BADGE: Record<string, string> = {
-  active: "bg-success/10 text-success",
-  paused: "bg-warning/10 text-warning",
-  draft: "bg-muted text-muted-foreground",
-};
+type Frequency = "once" | "weekly" | "monthly";
 
 interface ListSummary {
   id: string;
@@ -56,16 +62,12 @@ function emptyDraft() {
     area: null as AreaValue | null,
     radiusKm: 15,
     categoryPlaceType: "",
-    frequency: "monthly" as "once" | "weekly" | "monthly",
+    frequency: "monthly" as Frequency,
     dayOfWeek: 1,
     dayOfMonth: 1,
     time: "07:00",
     listId: "",
   };
-}
-
-function formatUsd(v: number) {
-  return `$${v.toFixed(4)}`;
 }
 
 interface OtherSearch {
@@ -77,9 +79,31 @@ interface OtherSearch {
   areaRadiusM: number;
 }
 
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <fieldset className="grid gap-5 border-b border-border px-5 py-6 last:border-0 sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-8">
+      <legend className="sr-only">{title}</legend>
+      <div aria-hidden>
+        <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+        {description && <p className="mt-1 text-[13px] text-muted-foreground">{description}</p>}
+      </div>
+      <div className="grid min-w-0 gap-5">{children}</div>
+    </fieldset>
+  );
+}
+
 export default function SearchDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  const toast = useToast();
   const isNew = params.id === "new";
 
   const [draft, setDraft] = useState(emptyDraft());
@@ -90,7 +114,7 @@ export default function SearchDetailPage() {
   const [costSummary, setCostSummary] = useState<CostSummary | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ area?: string; category?: string }>({});
   const [loaded, setLoaded] = useState(isNew);
 
   const load = useCallback(async () => {
@@ -138,8 +162,12 @@ export default function SearchDetailPage() {
   const selectedList = lists.find((l) => l.id === draft.listId) ?? null;
 
   async function handleSave() {
-    if (!draft.area || !draft.categoryPlaceType) {
-      alert("Seleziona zona e categoria prima di salvare");
+    const nextErrors: { area?: string; category?: string } = {};
+    if (!draft.area) nextErrors.area = "Scegli una zona dai suggerimenti.";
+    if (!draft.categoryPlaceType) nextErrors.category = "Seleziona una categoria.";
+    setErrors(nextErrors);
+    if (nextErrors.area || nextErrors.category || !draft.area) {
+      toast({ title: "Mancano dei dati", description: "Seleziona zona e categoria prima di salvare.", tone: "danger" });
       return;
     }
     setSaving(true);
@@ -167,14 +195,14 @@ export default function SearchDetailPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error ?? "Errore nel salvataggio");
+        toast({ title: "Salvataggio non riuscito", description: data.error, tone: "danger" });
         return;
       }
       if (isNew) {
+        toast({ title: "Ricerca creata", tone: "success" });
         router.push(`/ricerche/${data.search.id}`);
       } else {
-        setMessage("Salvato ✓");
-        setTimeout(() => setMessage(null), 1800);
+        toast({ title: "Modifiche salvate", tone: "success" });
         load();
       }
     } finally {
@@ -185,15 +213,14 @@ export default function SearchDetailPage() {
   async function handleTest() {
     if (isNew) return;
     setTesting(true);
-    setMessage("Esecuzione in corso…");
     try {
       const res = await fetch(`/api/searches/${params.id}/test`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
-        setMessage(data.error ?? "Errore nel TEST");
+        toast({ title: "Test non riuscito", description: data.error, tone: "danger" });
         return;
       }
-      setMessage("TEST accodato — controlla Logs tra qualche secondo per l'esito.");
+      toast({ title: "Test accodato", description: "Controlla Logs tra qualche secondo per l'esito.", tone: "success" });
       load();
     } finally {
       setTesting(false);
@@ -210,10 +237,11 @@ export default function SearchDetailPage() {
     });
     const data = await res.json();
     if (!res.ok) {
-      alert(data.error ?? "Errore");
+      toast({ title: "Operazione non riuscita", description: data.error, tone: "danger" });
       return;
     }
     setStatus(nextStatus);
+    toast({ title: nextStatus === "active" ? "Ricerca attivata" : "Ricerca messa in pausa", tone: "success" });
   }
 
   // Le ricerche "una tantum" restano "attive" per sempre dopo la prima esecuzione — per
@@ -224,312 +252,306 @@ export default function SearchDetailPage() {
     const res = await fetch(`/api/searches/${params.id}/run`, { method: "POST" });
     const data = await res.json();
     if (!res.ok) {
-      alert(data.error ?? "Errore");
+      toast({ title: "Operazione non riuscita", description: data.error, tone: "danger" });
       return;
     }
     setStatus("active");
-    setMessage("Ricerca accodata — controlla lo storico esecuzioni tra qualche secondo.");
+    toast({ title: "Ricerca accodata", description: "L'esito comparirà nello storico esecuzioni.", tone: "success" });
     load();
   }
 
-  if (!loaded) return <div className="px-12 pb-12 pt-10 text-sm text-muted-foreground">Caricamento…</div>;
+  if (!loaded) return <PageSkeleton rows={8} />;
+
+  const runControls = !isNew && (
+    <>
+      <Button variant="outline" loading={testing} onClick={handleTest}>
+        {!testing && <Flask aria-hidden />}
+        Esegui test
+      </Button>
+      {draft.frequency === "once" ? (
+        <Button variant="outline" onClick={handleRunOnce} disabled={!draft.listId}>
+          <Play weight="fill" aria-hidden />
+          {status === "active" ? "Esegui di nuovo" : "Esegui"}
+        </Button>
+      ) : (
+        <Button variant="outline" onClick={handleToggleStatus} disabled={status === "draft" && !draft.listId}>
+          {status === "active" ? <Pause weight="fill" aria-hidden /> : <Play weight="fill" aria-hidden />}
+          {status === "active" ? "Pausa" : "Attiva"}
+        </Button>
+      )}
+    </>
+  );
 
   return (
-    <div className="px-12 pb-12 pt-10">
-      <button className="mb-2.5 p-0 text-[13px] text-muted-foreground" onClick={() => router.push("/ricerche")}>
-        ← Torna a Ricerche
-      </button>
-      <div className="mb-1.5 flex items-center gap-3">
-        <input
-          className="text-[28px] font-semibold tracking-tight focus:outline-none"
-          placeholder="Nuova ricerca"
-          value={draft.title}
-          onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-        />
-        {!isNew && (
-          <span className={`w-fit rounded-full px-3 py-0.5 text-xs font-medium ${STATUS_BADGE[status]}`}>
-            {STATUS_LABEL[status]}
-          </span>
-        )}
-      </div>
-      <p className="mb-8 text-sm text-muted-foreground">
-        Zona e categoria da Google Places, frequenza e lista di destinazione
-      </p>
-
-      <div className="grid grid-cols-[1.1fr_0.9fr] gap-6">
-        <div className="rounded-xl border border-border bg-muted p-5">
-          <div className="mb-3.5 text-[13px] font-semibold">Dati</div>
-
-          <Field label="Zona (Google Places)">
-            <AreaAutocomplete
-              value={draft.area}
-              onChange={(area) =>
-                setDraft((d) => ({
-                  ...d,
-                  area,
-                  // Precompila il raggio per coprire l'intero comune selezionato (dal bounding
-                  // box che Google restituisce) — resta comunque modificabile a mano sotto.
-                  radiusKm: area.suggestedRadiusM
-                    ? Math.round(area.suggestedRadiusM / 1000)
-                    : d.radiusKm,
-                }))
-              }
-            />
-          </Field>
-
-          <Field label="Raggio di copertura (km)">
+    <>
+      <PageHeader
+        back={{ label: "Ricerche", href: "/ricerche" }}
+        title={
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <input
-              type="number"
-              min={1}
-              max={50}
-              className={inputClass}
-              value={draft.radiusKm}
-              onChange={(e) => setDraft((d) => ({ ...d, radiusKm: Number(e.target.value) }))}
+              aria-label="Titolo della ricerca"
+              className="field-sizing-content -mx-2 min-w-[9ch] max-w-full rounded-md bg-transparent px-2 py-0.5 text-2xl font-semibold tracking-[-0.02em] transition-colors placeholder:text-muted-soft hover:bg-muted focus-visible:bg-muted focus-visible:outline-2"
+              placeholder="Nuova ricerca"
+              value={draft.title}
+              onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
             />
-            <div className="mt-1.5 text-xs text-muted-soft">
-              Precompilato automaticamente per coprire l&apos;intero comune scelto sopra —
-              modificalo solo se vuoi un&apos;area più piccola o più ampia. Google restituisce al
-              massimo 20 risultati a chiamata: l&apos;area viene coperta con più chiamate (a
-              griglia, con suddivisione automatica nelle zone dense).
-            </div>
-          </Field>
+            {!isNew && <SearchStatusBadge status={status} />}
+          </span>
+        }
+        description="Zona e categoria da Google Places, frequenza di esecuzione e lista di destinazione."
+        actions={runControls}
+      />
 
-          {draft.area && (
-            <Field label="Copertura sulla mappa">
-              <CoverageMap
-                circles={[
-                  ...otherSearches.map((s) => ({
-                    id: s.id,
-                    lat: Number(s.areaLat),
-                    lng: Number(s.areaLng),
-                    radiusM: s.areaRadiusM,
-                    label: `${s.title || "Nuova ricerca"} — ${s.areaLabel} (${Math.round(s.areaRadiusM / 1000)} km)`,
-                    color: "#9ca3af",
-                    href: `/ricerche/${s.id}`,
-                  })),
-                  {
-                    id: "preview",
-                    lat: draft.area.lat,
-                    lng: draft.area.lng,
-                    radiusM: draft.radiusKm * 1000,
-                    label: `${draft.area.label} — ${draft.radiusKm} km (questa ricerca)`,
-                  },
-                ]}
-                height={320}
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <Panel className="rise" style={{ "--i": 1 } as React.CSSProperties}>
+          <Section title="Zona" description="Dove cercare e quanto è ampia l'area scansionata.">
+            <Field label="Zona (Google Places)" error={errors.area}>
+              <AreaAutocomplete
+                value={draft.area}
+                onChange={(area) => {
+                  setErrors((e) => ({ ...e, area: undefined }));
+                  setDraft((d) => ({
+                    ...d,
+                    area,
+                    // Precompila il raggio per coprire l'intero comune selezionato (dal bounding
+                    // box che Google restituisce) — resta comunque modificabile a mano sotto.
+                    radiusKm: area.suggestedRadiusM ? Math.round(area.suggestedRadiusM / 1000) : d.radiusKm,
+                  }));
+                }}
               />
-              <div className="mt-1.5 text-xs text-muted-soft">
-                In blu questa ricerca, in grigio le altre già impostate (per capire a colpo
-                d&apos;occhio quanti km usano zone simili — clicca per aprirle). Il cerchio è
-                l&apos;area effettivamente scansionata, non il confine amministrativo esatto del
-                comune (Google non lo espone via API).
+            </Field>
+
+            <Field
+              label="Raggio di copertura"
+              hint="Precompilato per coprire l'intero comune scelto: modificalo solo se vuoi un'area più piccola o più ampia."
+            >
+              <div className="relative max-w-40">
+                <Input
+                  type="number"
+                  min={1}
+                  max={50}
+                  className="num pr-10"
+                  value={draft.radiusKm}
+                  onChange={(e) => setDraft((d) => ({ ...d, radiusKm: Number(e.target.value) }))}
+                />
+                <span aria-hidden className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-soft">
+                  km
+                </span>
               </div>
             </Field>
-          )}
 
-          <Field label="Categoria commerciale (Place Type)">
-            <select
-              className={selectClass}
-              value={draft.categoryPlaceType}
-              onChange={(e) => setDraft((d) => ({ ...d, categoryPlaceType: e.target.value }))}
-            >
-              <option value="">Seleziona una categoria…</option>
-              {PLACE_TYPES.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </Field>
+            {draft.area && (
+              <div className="grid gap-2">
+                <div className="text-[13px] font-medium">Copertura sulla mappa</div>
+                <CoverageMap
+                  circles={[
+                    ...otherSearches.map((s) => ({
+                      id: s.id,
+                      lat: Number(s.areaLat),
+                      lng: Number(s.areaLng),
+                      radiusM: s.areaRadiusM,
+                      label: `${s.title || "Nuova ricerca"} — ${s.areaLabel} (${Math.round(s.areaRadiusM / 1000)} km)`,
+                      color: "muted",
+                      href: `/ricerche/${s.id}`,
+                    })),
+                    {
+                      id: "preview",
+                      lat: draft.area.lat,
+                      lng: draft.area.lng,
+                      radiusM: draft.radiusKm * 1000,
+                      label: `${draft.area.label} — ${draft.radiusKm} km (questa ricerca)`,
+                    },
+                  ]}
+                  height={320}
+                />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  In blu questa ricerca, in grigio le altre già impostate (clicca per aprirle). Il cerchio è
+                  l&apos;area effettivamente scansionata, non il confine amministrativo esatto del comune.
+                </p>
+              </div>
+            )}
+          </Section>
 
-          <Field label="Frequenza">
-            <div className="flex gap-2 rounded-full bg-background p-1.5">
-              {(["once", "weekly", "monthly"] as const).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  className={`flex-1 rounded-full px-2.5 py-2 text-[13px] font-medium ${
-                    draft.frequency === f ? "bg-muted shadow-sm" : "text-muted-foreground"
-                  }`}
-                  onClick={() => setDraft((d) => ({ ...d, frequency: f }))}
-                >
-                  {f === "once" ? "Una tantum" : f === "weekly" ? "Settimanale" : "Mensile"}
-                </button>
-              ))}
-            </div>
-          </Field>
-
-          {draft.frequency === "weekly" && (
-            <Field label="Giorno della settimana">
-              <select
-                className={selectClass}
-                value={draft.dayOfWeek}
-                onChange={(e) => setDraft((d) => ({ ...d, dayOfWeek: Number(e.target.value) }))}
+          <Section title="Categoria" description="Il tipo di attività da cercare.">
+            <Field label="Categoria commerciale (Place Type)" error={errors.category}>
+              <Select
+                value={draft.categoryPlaceType}
+                onChange={(e) => {
+                  setErrors((er) => ({ ...er, category: undefined }));
+                  setDraft((d) => ({ ...d, categoryPlaceType: e.target.value }));
+                }}
               >
-                {WEEKDAYS.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.label}
+                <option value="">Seleziona una categoria…</option>
+                {PLACE_TYPES.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
-          )}
-          {draft.frequency === "monthly" && (
-            <Field label="Giorno del mese">
-              <input
-                type="number"
-                min={1}
-                max={31}
-                className={inputClass}
-                value={draft.dayOfMonth}
-                onChange={(e) => setDraft((d) => ({ ...d, dayOfMonth: Number(e.target.value) }))}
-              />
-            </Field>
-          )}
-          {draft.frequency !== "once" && (
-            <Field label="Ora di partenza (Europe/Rome)">
-              <input
-                type="time"
-                className={inputClass}
-                value={draft.time}
-                onChange={(e) => setDraft((d) => ({ ...d, time: e.target.value }))}
-              />
-            </Field>
-          )}
+          </Section>
 
-          <div className="mb-1 border-t border-border pt-5">
-            <Field label="Lista di destinazione">
-              <select
-                className={selectClass}
-                value={draft.listId}
-                onChange={(e) => setDraft((d) => ({ ...d, listId: e.target.value }))}
-              >
-                <option value="">Nessuna — verrà creata al primo TEST</option>
+          <Section title="Pianificazione" description="Ogni quanto la ricerca viene rieseguita.">
+            <div className="grid gap-1.5">
+              <div className="text-[13px] font-medium">Frequenza</div>
+              <Segmented<Frequency>
+                label="Frequenza"
+                value={draft.frequency}
+                onChange={(f) => setDraft((d) => ({ ...d, frequency: f }))}
+                options={[
+                  { value: "once", label: "Una tantum" },
+                  { value: "weekly", label: "Settimanale" },
+                  { value: "monthly", label: "Mensile" },
+                ]}
+              />
+            </div>
+
+            {draft.frequency !== "once" && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {draft.frequency === "weekly" ? (
+                  <Field label="Giorno della settimana">
+                    <Select
+                      value={draft.dayOfWeek}
+                      onChange={(e) => setDraft((d) => ({ ...d, dayOfWeek: Number(e.target.value) }))}
+                    >
+                      {WEEKDAYS.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                ) : (
+                  <Field label="Giorno del mese">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={31}
+                      className="num"
+                      value={draft.dayOfMonth}
+                      onChange={(e) => setDraft((d) => ({ ...d, dayOfMonth: Number(e.target.value) }))}
+                    />
+                  </Field>
+                )}
+                <Field label="Ora di partenza" hint="Fuso orario Europe/Rome.">
+                  <Input
+                    type="time"
+                    className="num"
+                    value={draft.time}
+                    onChange={(e) => setDraft((d) => ({ ...d, time: e.target.value }))}
+                  />
+                </Field>
+              </div>
+            )}
+          </Section>
+
+          <Section title="Destinazione" description="Dove finiscono i risultati trovati.">
+            <Field
+              label="Lista di destinazione"
+              hint={
+                selectedList ? (
+                  <>
+                    Webhook, prompt AI e filtri di invio si configurano nella lista collegata:{" "}
+                    <Link className="font-medium text-brand underline-offset-2 hover:underline" href={`/liste?list=${selectedList.id}`}>
+                      apri &ldquo;{selectedList.name}&rdquo;
+                    </Link>
+                  </>
+                ) : (
+                  "Webhook, prompt AI e filtri di invio si configurano nella lista di destinazione."
+                )
+              }
+            >
+              <Select value={draft.listId} onChange={(e) => setDraft((d) => ({ ...d, listId: e.target.value }))}>
+                <option value="">Nessuna — verrà creata al primo test</option>
                 {lists.map((l) => (
                   <option key={l.id} value={l.id}>
                     {l.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
-            <div className="text-xs text-muted-soft">
-              {selectedList ? (
-                <>
-                  Webhook, prompt AI e filtri di invio si configurano nella lista collegata →{" "}
-                  <a className="underline" href={`/liste?list=${selectedList.id}`}>
-                    vai a &ldquo;{selectedList.name}&rdquo;
-                  </a>
-                </>
-              ) : (
-                "Webhook, prompt AI e filtri di invio si configurano nella lista di destinazione."
-              )}
-            </div>
-          </div>
+          </Section>
 
-          {message && <div className="mb-3 mt-4 text-xs text-muted-foreground">{message}</div>}
-
-          <div className="mt-5 flex gap-3">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={handleSave}
-              className="h-10 flex-1 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
-            >
+          <div className="sticky bottom-0 flex items-center justify-end gap-3 rounded-b-lg border-t border-border bg-card/90 px-5 py-3.5 backdrop-blur">
+            <Button variant="default" size="lg" loading={saving} onClick={handleSave}>
               {isNew ? "Crea ricerca" : "Salva modifiche"}
-            </button>
-            {!isNew && (
-              <>
-                <button
-                  type="button"
-                  disabled={testing}
-                  onClick={handleTest}
-                  className="h-10 flex-1 rounded-md border border-border bg-background text-sm font-semibold disabled:opacity-60"
-                >
-                  {testing ? "In corso…" : "Esegui TEST"}
-                </button>
-                {draft.frequency === "once" ? (
-                  <button
-                    type="button"
-                    onClick={handleRunOnce}
-                    disabled={!draft.listId}
-                    className="h-10 flex-1 rounded-md border border-border bg-background text-sm font-semibold disabled:opacity-40"
-                  >
-                    {status === "active" ? "Esegui di nuovo" : "Esegui"}
-                  </button>
+            </Button>
+          </div>
+        </Panel>
+
+        <div className="grid gap-6">
+          {isNew ? (
+            <Panel className="rise" style={{ "--i": 2 } as React.CSSProperties}>
+              <PanelHeader title="Come viene coperta l'area" />
+              <PanelBody className="flex gap-3 text-[13px] leading-relaxed text-muted-foreground">
+                <Info size={18} weight="fill" aria-hidden className="mt-0.5 shrink-0 text-brand" />
+                <p>
+                  Google restituisce al massimo 20 risultati a chiamata: l&apos;area viene quindi coperta con più
+                  chiamate, a griglia, con suddivisione automatica nelle zone dense. Scegli la zona e il raggio
+                  verrà proposto in automatico.
+                </p>
+              </PanelBody>
+            </Panel>
+          ) : (
+            <>
+              <Panel className="rise" style={{ "--i": 2 } as React.CSSProperties}>
+                <PanelHeader title="Costi API di questa ricerca" />
+                {costSummary ? (
+                  <PanelBody>
+                    <div className="text-[13px] text-muted-foreground">Totale</div>
+                    <div className="num mt-1 text-[28px] font-semibold leading-none tracking-[-0.025em]">
+                      {formatUsd(costSummary.totalUsd)}
+                    </div>
+                    <dl className="mt-5 grid gap-2 border-t border-hairline-soft pt-4 text-[13px]">
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Google Places</dt>
+                        <dd className="num">{formatUsd(costSummary.googleApiUsd)}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Analisi AI</dt>
+                        <dd className="num">{formatUsd(costSummary.aiAnalysisUsd)}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt className="text-muted-foreground">Chiamate totali</dt>
+                        <dd className="num">{costSummary.callCount.toLocaleString("it-IT")}</dd>
+                      </div>
+                    </dl>
+                  </PanelBody>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={handleToggleStatus}
-                    disabled={status === "draft" && !draft.listId}
-                    className="h-10 flex-1 rounded-md border border-border bg-background text-sm font-semibold disabled:opacity-40"
-                  >
-                    {status === "active" ? "Pausa" : "Attiva"}
-                  </button>
+                  <PanelBody>
+                    <p className="text-[13px] text-muted-soft">Nessun costo registrato ancora.</p>
+                  </PanelBody>
                 )}
-              </>
-            )}
-          </div>
+              </Panel>
+
+              <Panel className="rise" style={{ "--i": 3 } as React.CSSProperties}>
+                <PanelHeader title="Storico esecuzioni" />
+                {runs.length === 0 ? (
+                  <PanelBody>
+                    <p className="text-[13px] text-muted-soft">Nessuna esecuzione ancora.</p>
+                  </PanelBody>
+                ) : (
+                  <ol className="divide-y divide-hairline-soft">
+                    {runs.map((r) => (
+                      <li key={r.id} className="px-5 py-3.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <time dateTime={r.startedAt} className="num text-[13px] font-medium">
+                            {formatDateTime(r.startedAt)}
+                          </time>
+                          <RunStatusBadge status={r.status} />
+                        </div>
+                        <p className="num mt-1.5 text-xs text-muted-foreground">
+                          {r.resultsCount} risultati · {r.newCount} nuovi · {r.duplicateCount} duplicati
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </Panel>
+            </>
+          )}
         </div>
-
-        {!isNew && (
-          <div className="flex flex-col gap-5">
-            <div className="rounded-xl border border-border bg-muted p-5">
-              <div className="mb-3.5 text-[13px] font-semibold">Costi API di questa ricerca</div>
-              {costSummary ? (
-                <div className="flex flex-col gap-2.5">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Totale</span>
-                    <span className="font-semibold">{formatUsd(costSummary.totalUsd)}</span>
-                  </div>
-                  <div className="flex justify-between text-[13px]">
-                    <span className="text-muted-foreground">Google Places API</span>
-                    <span>{formatUsd(costSummary.googleApiUsd)}</span>
-                  </div>
-                  <div className="flex justify-between text-[13px]">
-                    <span className="text-muted-foreground">Analisi AI (OpenAI)</span>
-                    <span>{formatUsd(costSummary.aiAnalysisUsd)}</span>
-                  </div>
-                  <div className="flex justify-between text-[13px]">
-                    <span className="text-muted-foreground">Chiamate totali</span>
-                    <span>{costSummary.callCount}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-xs text-muted-soft">Nessun costo registrato ancora</div>
-              )}
-            </div>
-
-            <div className="rounded-xl border border-border bg-muted p-5">
-              <div className="mb-3.5 text-[13px] font-semibold">Storico esecuzioni</div>
-              {runs.length === 0 && <div className="text-xs text-muted-soft">Nessuna esecuzione ancora</div>}
-              <div className="flex flex-col gap-2.5">
-                {runs.map((r) => (
-                  <div key={r.id} className="rounded-md border border-border bg-background p-3">
-                    <div className="mb-1.5 flex justify-between">
-                      <span className="text-[13px] font-medium">
-                        {new Date(r.startedAt).toLocaleString("it-IT")}
-                      </span>
-                      <span
-                        className={`rounded-full px-3 py-0.5 text-xs font-medium ${
-                          r.status === "done"
-                            ? "bg-success/10 text-success"
-                            : r.status === "failed"
-                              ? "bg-destructive/10 text-destructive"
-                              : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {r.status === "done" ? "Completata" : r.status === "failed" ? "Errore" : "In corso"}
-                      </span>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {r.resultsCount} risultati · {r.newCount} nuovi · {r.duplicateCount} duplicati
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
-    </div>
+    </>
   );
 }

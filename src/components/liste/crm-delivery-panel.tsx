@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { inputClass, selectClass } from "@/components/ui/field";
+import { ArrowsClockwise, CheckCircle, HourglassMedium, WarningCircle, type Icon } from "@phosphor-icons/react";
+import { Field, Input, Select } from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
+import { Badge, type Tone } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 const LABELS = {
   pending: "In coda",
@@ -9,6 +13,14 @@ const LABELS = {
   review: "Da verificare",
   delivered: "Inviato",
   failed: "Errore",
+};
+
+const STATE_STYLE: Record<keyof typeof LABELS, { tone: Tone; icon: Icon; bar: string; iconClass: string }> = {
+  pending: { tone: "brand", icon: HourglassMedium, bar: "border-l-brand", iconClass: "text-brand" },
+  processing: { tone: "brand", icon: ArrowsClockwise, bar: "border-l-brand", iconClass: "text-brand" },
+  review: { tone: "warning", icon: WarningCircle, bar: "border-l-warning", iconClass: "text-warning-fg" },
+  delivered: { tone: "success", icon: CheckCircle, bar: "border-l-success", iconClass: "text-success-fg" },
+  failed: { tone: "danger", icon: WarningCircle, bar: "border-l-destructive", iconClass: "text-destructive-fg" },
 };
 
 export interface CrmDeliverySummary {
@@ -39,10 +51,14 @@ export function CrmDeliveryPanel({
   const needsReview = delivery.status === "review";
   const failed = delivery.status === "failed";
   const processing = delivery.status === "pending" || delivery.status === "processing";
+  const style = STATE_STYLE[delivery.status];
+  const StateIcon = style.icon;
 
   useEffect(() => {
     if (!processing) return;
-    const timer = setInterval(() => { void onChange().catch(() => {}); }, 5000);
+    const timer = setInterval(() => {
+      void onChange().catch(() => {});
+    }, 5000);
     return () => clearInterval(timer);
   }, [onChange, processing]);
 
@@ -105,59 +121,91 @@ export function CrmDeliveryPanel({
     }
   }
 
-  const buttonClass = "w-fit rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50";
   return (
-    <section className="mb-6 rounded-lg border border-hairline-soft p-4">
-      <h2 className="text-sm font-semibold">CRM MDNT · {LABELS[delivery.status]}</h2>
-      {delivery.message && <p className="mt-1 text-sm text-muted-foreground">{delivery.message}</p>}
-      {(failed || (needsReview && !review)) && (
-        <form onSubmit={handleCode} className="mt-3 flex flex-wrap items-end gap-2">
-          <label className="grid gap-1 text-sm">
-            Codice operatore
-            <input className={inputClass} type="password" autoComplete="off" value={token}
-              onChange={(event) => setToken(event.target.value)} required />
-          </label>
-          <button className={buttonClass} disabled={busy}>{failed ? "Riprova invio al CRM" : "Apri verifica"}</button>
-        </form>
-      )}
-      {needsReview && review && (
-        <form onSubmit={confirm} className="mt-3 grid max-w-xl gap-3">
-          {review.candidates?.length ? (
-            <label className="grid gap-1 text-sm">
-              Azienda esistente
-              <select name="company" className={selectClass} defaultValue="" required>
-                <option value="" disabled>Scegli un’azienda</option>
-                {review.candidates.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {[candidate.name, candidate.street, candidate.city, candidate.website].filter(Boolean).join(" · ")}
-                  </option>
-                ))}
-                <option value="new">Crea una nuova azienda</option>
-              </select>
-            </label>
-          ) : null}
-          <label className="grid gap-1 text-sm">
-            Nome azienda verificato
-            <input name="name" className={inputClass} defaultValue={review.evidence?.name} maxLength={250} required />
-          </label>
-          <label className="grid gap-1 text-sm">
-            URL della fonte
-            <input name="sourceUrl" className={inputClass} type="url" defaultValue={review.evidence?.sourceUrl} required />
-          </label>
-          <label className="grid gap-1 text-sm">
-            Sito ufficiale (facoltativo)
-            <input name="website" className={inputClass} type="url" defaultValue={review.evidence?.website} />
-          </label>
-          <fieldset className="grid gap-2 sm:grid-cols-3">
-            <legend className="mb-1 text-sm">Indirizzo verificato (facoltativo)</legend>
-            <input name="street" aria-label="Via e numero" placeholder="Via e numero" className={inputClass} defaultValue={review.evidence?.street} />
-            <input name="city" aria-label="Comune" placeholder="Comune" className={inputClass} defaultValue={review.evidence?.city} />
-            <input name="postcode" aria-label="CAP" placeholder="CAP" className={inputClass} defaultValue={review.evidence?.postcode} />
-          </fieldset>
-          <button className={buttonClass} disabled={busy}>Conferma e invia al CRM</button>
-        </form>
-      )}
-      {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
+    <section
+      aria-label="Consegna al CRM"
+      className={cn("rise mb-6 rounded-lg border border-l-4 border-border bg-card p-5 shadow-panel", style.bar)}
+    >
+      <div className="flex items-start gap-3">
+        <StateIcon
+          size={20}
+          weight="fill"
+          aria-hidden
+          className={cn("mt-0.5 shrink-0", style.iconClass, delivery.status === "processing" && "animate-spin")}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-semibold tracking-tight">CRM MDNT</h2>
+            <Badge tone={style.tone}>{LABELS[delivery.status]}</Badge>
+          </div>
+          {delivery.message && <p className="mt-1 text-[13px] text-muted-foreground">{delivery.message}</p>}
+
+          {(failed || (needsReview && !review)) && (
+            <form onSubmit={handleCode} className="mt-4 flex flex-wrap items-end gap-3">
+              <Field label="Codice operatore" className="w-full max-w-64">
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  value={token}
+                  onChange={(event) => setToken(event.target.value)}
+                  required
+                />
+              </Field>
+              <Button type="submit" loading={busy}>
+                {failed ? "Riprova invio al CRM" : "Apri verifica"}
+              </Button>
+            </form>
+          )}
+
+          {needsReview && review && (
+            <form onSubmit={confirm} className="mt-4 grid max-w-xl gap-4">
+              {review.candidates?.length ? (
+                <Field label="Azienda esistente">
+                  <Select name="company" defaultValue="" required>
+                    <option value="" disabled>
+                      Scegli un’azienda
+                    </option>
+                    {review.candidates.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {[candidate.name, candidate.street, candidate.city, candidate.website].filter(Boolean).join(" · ")}
+                      </option>
+                    ))}
+                    <option value="new">Crea una nuova azienda</option>
+                  </Select>
+                </Field>
+              ) : null}
+              <Field label="Nome azienda verificato">
+                <Input name="name" defaultValue={review.evidence?.name} maxLength={250} required />
+              </Field>
+              <Field label="URL della fonte">
+                <Input name="sourceUrl" type="url" defaultValue={review.evidence?.sourceUrl} required />
+              </Field>
+              <Field label="Sito ufficiale" optional>
+                <Input name="website" type="url" defaultValue={review.evidence?.website} />
+              </Field>
+              <fieldset className="grid gap-2 sm:grid-cols-3">
+                <legend className="mb-1.5 text-[13px] font-medium">
+                  Indirizzo verificato <span className="font-normal text-muted-soft">facoltativo</span>
+                </legend>
+                <Input name="street" aria-label="Via e numero" placeholder="Via e numero" defaultValue={review.evidence?.street} />
+                <Input name="city" aria-label="Comune" placeholder="Comune" defaultValue={review.evidence?.city} />
+                <Input name="postcode" aria-label="CAP" placeholder="CAP" defaultValue={review.evidence?.postcode} />
+              </fieldset>
+              <div>
+                <Button type="submit" loading={busy}>
+                  Conferma e invia al CRM
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {error && (
+            <p role="alert" className="mt-3 text-[13px] font-medium text-destructive-fg">
+              {error}
+            </p>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

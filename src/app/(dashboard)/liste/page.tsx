@@ -1,11 +1,34 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  ArrowDown,
+  ArrowUp,
+  CaretUpDown,
+  Check,
+  ListBullets,
+  PencilSimple,
+  Plus,
+  SlidersHorizontal,
+  Trash,
+  X,
+} from "@phosphor-icons/react";
 import { NewListDrawer } from "@/components/liste/new-list-drawer";
 import { AttributesPanel, type ListAttribute } from "@/components/liste/attributes-panel";
-import { DELIVERY_STATUS_LABEL } from "@/lib/placeFields";
 import type { DeliveryRules } from "@/lib/deliveryRules";
+import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
+import { Drawer } from "@/components/ui/drawer";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Pagination } from "@/components/ui/pagination";
+import { Segmented } from "@/components/ui/segmented";
+import { Skeleton, PageSkeleton } from "@/components/ui/skeleton";
+import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { DeliveryBadge } from "@/components/status-badges";
+import { useConfirm } from "@/components/ui/confirm";
+import { useToast } from "@/components/ui/toast";
+import { cn } from "@/lib/utils";
 
 interface ListOverview {
   id: string;
@@ -44,23 +67,11 @@ interface PlaceRow {
   values: string[];
 }
 
-const STATUS_FILTERS = [
-  { value: "all", label: "Tutti" },
-  { value: "pending", label: "Nuovo" },
-  { value: "delivered", label: "Consegnato" },
-  { value: "failed", label: "Fallito" },
-  { value: "excluded", label: "Escluso" },
-];
-
-const STATUS_BADGE_CLASS: Record<string, string> = {
-  delivered: "bg-success/10 text-success",
-  failed: "bg-destructive/10 text-destructive",
-  excluded: "bg-warning/10 text-warning",
-  pending: "bg-muted text-muted-foreground",
-};
+type StatusFilter = "all" | "pending" | "delivered" | "failed" | "excluded";
 
 export default function ListePage() {
-  const router = useRouter();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [lists, setLists] = useState<ListOverview[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<ListDetail | null>(null);
@@ -73,7 +84,7 @@ export default function ListePage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortBy, setSortBy] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
@@ -87,40 +98,43 @@ export default function ListePage() {
     setLoading(false);
   }, []);
 
-  const loadDetail = useCallback(async (id: string, p = 1, status = "all") => {
-    const params = new URLSearchParams({ page: String(p), pageSize: "25", deliveryStatus: status });
-    if (sortBy) {
-      params.set("sortBy", sortBy);
-      params.set("sortDir", sortDir);
-    }
-    const [detailRes, placesRes] = await Promise.all([
-      fetch(`/api/lists/${id}`),
-      fetch(`/api/lists/${id}/places?${params.toString()}`),
-    ]);
-    const detailData = await detailRes.json();
-    const placesData = await placesRes.json();
-    setDetail({
-      id: detailData.list.id,
-      name: detailData.list.name,
-      searchNames: detailData.list.searchNames,
-      visibleFields: detailData.list.visibleFields ?? [],
-      attributes: detailData.list.attributes ?? [],
-      deliveryRules: detailData.list.deliveryRules ?? null,
-      excludeChainsThreshold: detailData.list.excludeChainsThreshold ?? null,
-      aiAnalysisEnabled: !!detailData.list.aiAnalysisEnabled,
-      aiPromptMd: detailData.list.aiPromptMd ?? null,
-      aiVisionEnabled: !!detailData.list.aiVisionEnabled,
-      outboundWebhookUrl: detailData.list.outboundWebhookUrl ?? null,
-      hasOutboundWebhookSecret: !!detailData.list.hasOutboundWebhookSecret,
-      outboundFields: detailData.list.outboundFields ?? null,
-    });
-    setNameDraft(detailData.list.name);
-    setColumns(placesData.visibleColumns ?? []);
-    setPlaces(placesData.places ?? []);
-    setTotalPages(placesData.totalPages ?? 1);
-    setTotal(placesData.total ?? 0);
-    setSelectedRows(new Set());
-  }, [sortBy, sortDir]);
+  const loadDetail = useCallback(
+    async (id: string, p = 1, status = "all") => {
+      const params = new URLSearchParams({ page: String(p), pageSize: "25", deliveryStatus: status });
+      if (sortBy) {
+        params.set("sortBy", sortBy);
+        params.set("sortDir", sortDir);
+      }
+      const [detailRes, placesRes] = await Promise.all([
+        fetch(`/api/lists/${id}`),
+        fetch(`/api/lists/${id}/places?${params.toString()}`),
+      ]);
+      const detailData = await detailRes.json();
+      const placesData = await placesRes.json();
+      setDetail({
+        id: detailData.list.id,
+        name: detailData.list.name,
+        searchNames: detailData.list.searchNames,
+        visibleFields: detailData.list.visibleFields ?? [],
+        attributes: detailData.list.attributes ?? [],
+        deliveryRules: detailData.list.deliveryRules ?? null,
+        excludeChainsThreshold: detailData.list.excludeChainsThreshold ?? null,
+        aiAnalysisEnabled: !!detailData.list.aiAnalysisEnabled,
+        aiPromptMd: detailData.list.aiPromptMd ?? null,
+        aiVisionEnabled: !!detailData.list.aiVisionEnabled,
+        outboundWebhookUrl: detailData.list.outboundWebhookUrl ?? null,
+        hasOutboundWebhookSecret: !!detailData.list.hasOutboundWebhookSecret,
+        outboundFields: detailData.list.outboundFields ?? null,
+      });
+      setNameDraft(detailData.list.name);
+      setColumns(placesData.visibleColumns ?? []);
+      setPlaces(placesData.places ?? []);
+      setTotalPages(placesData.totalPages ?? 1);
+      setTotal(placesData.total ?? 0);
+      setSelectedRows(new Set());
+    },
+    [sortBy, sortDir],
+  );
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch dati iniziali al mount
@@ -159,18 +173,21 @@ export default function ListePage() {
       body: JSON.stringify({ name: nameDraft.trim() }),
     });
     setRenaming(false);
+    toast({ title: "Lista rinominata", tone: "success" });
     loadDetail(detail.id, page, statusFilter);
   }
 
   async function deleteList() {
     if (!detail) return;
-    if (
-      !confirm(
-        `Eliminare la lista "${detail.name}"? Verranno eliminati anche tutti i ${total} risultati contenuti. L'azione non è reversibile.`,
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: `Eliminare la lista "${detail.name}"?`,
+      description: `Verranno eliminati anche tutti i ${total.toLocaleString("it-IT")} risultati contenuti. L'azione non è reversibile.`,
+      confirmLabel: "Elimina lista",
+      tone: "danger",
+    });
+    if (!ok) return;
     await fetch(`/api/lists/${detail.id}`, { method: "DELETE" });
+    toast({ title: "Lista eliminata", tone: "success" });
     backToOverview();
   }
 
@@ -199,82 +216,261 @@ export default function ListePage() {
     }
   }
 
-  async function deletePlace(id: string) {
-    if (!confirm("Eliminare questo risultato?")) return;
-    await fetch(`/api/places/${id}`, { method: "DELETE" });
+  async function deletePlace(p: PlaceRow) {
+    const ok = await confirm({
+      title: "Eliminare questo risultato?",
+      description: p.name,
+      confirmLabel: "Elimina",
+      tone: "danger",
+    });
+    if (!ok) return;
+    await fetch(`/api/places/${p.id}`, { method: "DELETE" });
+    toast({ title: "Risultato eliminato", tone: "success" });
     if (detail) loadDetail(detail.id, page, statusFilter);
   }
 
   async function deleteSelected() {
     if (selectedRows.size === 0) return;
-    if (!confirm(`Eliminare ${selectedRows.size} risultati selezionati?`)) return;
+    const ok = await confirm({
+      title: `Eliminare ${selectedRows.size} risultati selezionati?`,
+      description: "L'azione non è reversibile.",
+      confirmLabel: `Elimina ${selectedRows.size}`,
+      tone: "danger",
+    });
+    if (!ok) return;
     await fetch("/api/places", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids: [...selectedRows] }),
     });
+    toast({ title: `${selectedRows.size} risultati eliminati`, tone: "success" });
     if (detail) loadDetail(detail.id, page, statusFilter);
   }
 
-  if (selectedId && detail) {
-    const gridTemplate = `28px 1.8fr ${columns.map(() => "1fr").join(" ")} 1fr 40px`;
+  /* ───────────────────────── Dettaglio lista ───────────────────────── */
+  if (selectedId) {
+    if (!detail) return <PageSkeleton rows={8} />;
+    const overview = lists.find((l) => l.id === selectedId);
+
+    const sortLabel = (key: string): "ascending" | "descending" | "none" =>
+      sortBy === key ? (sortDir === "asc" ? "ascending" : "descending") : "none";
+
     return (
-      <div className="px-12 pb-12 pt-10">
-        <div className="mb-6 flex items-start justify-between">
-          <div>
-            <button className="mb-2.5 p-0 text-[13px] text-muted-foreground" onClick={backToOverview}>
-              ← Tutte le liste
-            </button>
-            {renaming ? (
-              <div className="mb-1.5 flex items-center gap-2">
+      <>
+        <PageHeader
+          back={{ label: "Tutte le liste", onClick: backToOverview }}
+          title={
+            renaming ? (
+              <span className="flex flex-wrap items-center gap-2">
                 <input
                   autoFocus
-                  className="h-9 rounded-md border border-border px-3 text-[22px] font-semibold tracking-tight"
+                  aria-label="Nome della lista"
+                  className="h-10 w-72 max-w-full rounded-md border border-input bg-card px-3 text-xl font-semibold tracking-tight focus-visible:border-brand focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-brand/20"
                   value={nameDraft}
                   onChange={(e) => setNameDraft(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && renameList()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") renameList();
+                    if (e.key === "Escape") {
+                      setRenaming(false);
+                      setNameDraft(detail.name);
+                    }
+                  }}
                 />
-                <button className="text-xs font-semibold underline" onClick={renameList}>
-                  Salva
-                </button>
-                <button
-                  className="text-xs text-muted-foreground"
+                <Button size="icon" variant="default" onClick={renameList} aria-label="Salva il nome">
+                  <Check weight="bold" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  aria-label="Annulla"
                   onClick={() => {
                     setRenaming(false);
                     setNameDraft(detail.name);
                   }}
                 >
-                  Annulla
-                </button>
-              </div>
+                  <X weight="bold" />
+                </Button>
+              </span>
             ) : (
-              <h1
-                className="mb-1.5 cursor-pointer text-[28px] font-semibold tracking-tight"
-                onClick={() => setRenaming(true)}
-                title="Clicca per rinominare"
-              >
+              <span className="flex items-center gap-1.5">
                 {detail.name}
-              </h1>
-            )}
-            <p className="text-sm text-muted-foreground">{detail.searchNames}</p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              className="h-10 rounded-md border border-border bg-background px-4 text-sm font-semibold"
-              onClick={() => setAttrsOpen((v) => !v)}
-            >
-              Modifica
-            </button>
-            <button
-              className="h-10 rounded-md border border-destructive/30 bg-background px-4 text-sm font-semibold text-destructive"
-              onClick={deleteList}
-            >
-              Elimina lista
-            </button>
-          </div>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setRenaming(true)}
+                  aria-label="Rinomina la lista"
+                  title="Rinomina"
+                >
+                  <PencilSimple />
+                </Button>
+              </span>
+            )
+          }
+          description={detail.searchNames}
+          actions={
+            <>
+              <Button variant="outline" onClick={() => setAttrsOpen(true)}>
+                <SlidersHorizontal aria-hidden />
+                Configura
+              </Button>
+              <Button variant="danger" onClick={deleteList}>
+                <Trash aria-hidden />
+                Elimina
+              </Button>
+            </>
+          }
+        />
+
+        <div className="rise mb-4 flex min-h-9 flex-wrap items-center justify-between gap-3" style={{ "--i": 1 } as React.CSSProperties}>
+          <Segmented<StatusFilter>
+            label="Filtra per stato di consegna"
+            value={statusFilter}
+            onChange={(v) => {
+              setStatusFilter(v);
+              setPage(1);
+            }}
+            options={[
+              { value: "all", label: "Tutti", count: overview?.total },
+              { value: "pending", label: "Nuovi", count: overview?.newCount },
+              { value: "delivered", label: "Consegnati", count: overview?.deliveredCount },
+              { value: "failed", label: "Falliti", count: overview?.failedCount },
+              { value: "excluded", label: "Esclusi", count: overview?.excludedCount },
+            ]}
+          />
+          {selectedRows.size > 0 && (
+            <div className="flex items-center gap-2" role="status">
+              <span className="num text-[13px] text-muted-foreground">{selectedRows.size} selezionati</span>
+              <Button size="sm" variant="ghost" onClick={() => setSelectedRows(new Set())}>
+                Deseleziona
+              </Button>
+              <Button size="sm" variant="destructive" onClick={deleteSelected}>
+                <Trash aria-hidden />
+                Elimina
+              </Button>
+            </div>
+          )}
         </div>
 
-        {attrsOpen && (
+        {places.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-input bg-card">
+            <EmptyState
+              icon={ListBullets}
+              title="Nessun risultato"
+              description={
+                statusFilter === "all"
+                  ? "Questa lista non contiene ancora risultati. Compariranno dopo la prima esecuzione di una ricerca collegata."
+                  : "Nessun risultato con questo stato di consegna."
+              }
+              action={
+                statusFilter !== "all" ? (
+                  <Button variant="outline" size="sm" onClick={() => setStatusFilter("all")}>
+                    Mostra tutti
+                  </Button>
+                ) : undefined
+              }
+            />
+          </div>
+        ) : (
+          <div className="rise" style={{ "--i": 2 } as React.CSSProperties}>
+            <Table minWidth={560 + columns.length * 150}>
+              <thead>
+                <tr>
+                  <Th className="w-10">
+                    <input
+                      type="checkbox"
+                      aria-label="Seleziona tutti i risultati della pagina"
+                      checked={places.length > 0 && selectedRows.size === places.length}
+                      onChange={toggleAllRows}
+                    />
+                  </Th>
+                  <Th>Attività</Th>
+                  {columns.map((c) => (
+                    <Th key={c.key} aria-sort={sortLabel(c.key)}>
+                      <button
+                        type="button"
+                        onClick={() => toggleSort(c.key)}
+                        title={`Ordina per ${c.label}`}
+                        className="group inline-flex items-center gap-1 rounded-sm transition-colors hover:text-foreground"
+                      >
+                        {c.label}
+                        {sortBy === c.key ? (
+                          sortDir === "desc" ? (
+                            <ArrowDown size={12} weight="bold" className="text-brand" aria-hidden />
+                          ) : (
+                            <ArrowUp size={12} weight="bold" className="text-brand" aria-hidden />
+                          )
+                        ) : (
+                          <CaretUpDown size={12} className="opacity-0 transition-opacity group-hover:opacity-60" aria-hidden />
+                        )}
+                      </button>
+                    </Th>
+                  ))}
+                  <Th>Consegna</Th>
+                  <Th className="w-10">
+                    <span className="sr-only">Azioni</span>
+                  </Th>
+                </tr>
+              </thead>
+              <tbody>
+                {places.map((p) => (
+                  <Tr key={p.id} data-selected={selectedRows.has(p.id)}>
+                    <Td>
+                      <input
+                        type="checkbox"
+                        aria-label={`Seleziona ${p.name}`}
+                        checked={selectedRows.has(p.id)}
+                        onChange={() => toggleRow(p.id)}
+                      />
+                    </Td>
+                    <Td className="max-w-[300px]">
+                      <Link
+                        href={`/liste/${detail.id}/${p.id}`}
+                        className="block truncate text-sm font-medium hover:text-brand"
+                        title={p.name}
+                      >
+                        {p.name}
+                      </Link>
+                      <div className="mt-0.5 truncate text-xs text-muted-soft">{p.address}</div>
+                    </Td>
+                    {p.values.map((v, i) => (
+                      <Td key={i} className="num max-w-[200px] truncate text-muted-foreground" title={v}>
+                        {v}
+                      </Td>
+                    ))}
+                    <Td>
+                      <div className="grid justify-items-start gap-1">
+                        <DeliveryBadge status={p.deliveryStatus} previewOnly={p.previewOnly} />
+                        {p.crmStatus === "review" && <span className="text-xs text-muted-foreground">CRM · Da verificare</span>}
+                        {p.crmStatus === "failed" && <span className="text-xs text-destructive-fg">CRM · Errore</span>}
+                      </div>
+                    </Td>
+                    <Td>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => deletePlace(p)}
+                        aria-label={`Elimina ${p.name}`}
+                        title="Elimina"
+                        className="hover:text-destructive-fg"
+                      >
+                        <Trash />
+                      </Button>
+                    </Td>
+                  </Tr>
+                ))}
+              </tbody>
+            </Table>
+            <Pagination page={page} totalPages={totalPages} total={total} noun="risultati" onPage={setPage} />
+          </div>
+        )}
+
+        <Drawer
+          open={attrsOpen}
+          onClose={() => setAttrsOpen(false)}
+          width={720}
+          title="Configura lista"
+          description={detail.name}
+        >
           <AttributesPanel
             listId={detail.id}
             attributes={detail.attributes}
@@ -289,194 +485,100 @@ export default function ListePage() {
             outboundFields={detail.outboundFields}
             onChanged={() => loadDetail(detail.id, page, statusFilter)}
           />
-        )}
-
-        <div className="mb-4 flex items-center justify-between">
-          <select
-            className="h-9 rounded-md border border-border bg-background px-3 text-[13px]"
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value);
-              setPage(1);
-            }}
-          >
-            {STATUS_FILTERS.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-          {selectedRows.size > 0 && (
-            <button
-              className="h-9 rounded-md bg-destructive px-4 text-[13px] font-semibold text-white"
-              onClick={deleteSelected}
-            >
-              Elimina selezionati ({selectedRows.size})
-            </button>
-          )}
-        </div>
-
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <div style={{ minWidth: 640 + columns.length * 140 }}>
-            <div
-              className="grid items-center gap-x-4 border-b border-border bg-muted px-5 py-3"
-              style={{ gridTemplateColumns: gridTemplate }}
-            >
-              <input
-                type="checkbox"
-                checked={places.length > 0 && selectedRows.size === places.length}
-                onChange={toggleAllRows}
-              />
-              <span className="min-w-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Attività
-              </span>
-              {columns.map((c) => (
-                <span
-                  key={c.key}
-                  className="min-w-0 flex cursor-pointer items-center gap-1 truncate text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                  title={`Ordina per ${c.label}`}
-                  onClick={() => toggleSort(c.key)}
-                >
-                  <span className="truncate">{c.label}</span>
-                  {sortBy === c.key && <span className="shrink-0">{sortDir === "desc" ? "↓" : "↑"}</span>}
-                </span>
-              ))}
-              <span className="min-w-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Consegna
-              </span>
-              <span />
-            </div>
-            {places.length === 0 && (
-              <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-                Nessun risultato con questo filtro.
-              </div>
-            )}
-            {places.map((p) => (
-              <div
-                key={p.id}
-                className="grid items-center gap-x-4 border-b border-hairline-soft px-5 py-3.5"
-                style={{ gridTemplateColumns: gridTemplate }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedRows.has(p.id)}
-                  onChange={() => toggleRow(p.id)}
-                />
-                <span
-                  className="min-w-0 cursor-pointer"
-                  onClick={() => router.push(`/liste/${detail.id}/${p.id}`)}
-                >
-                  <div className="truncate text-sm font-medium">{p.name}</div>
-                  <div className="truncate text-xs text-muted-soft">{p.address}</div>
-                </span>
-                {p.values.map((v, i) => (
-                  <span key={i} className="min-w-0 truncate text-[13px]" title={v}>
-                    {v}
-                  </span>
-                ))}
-                <div className="grid justify-items-start gap-1">
-                  <span
-                    className={`w-fit rounded-full px-3 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[p.deliveryStatus] ?? "bg-muted text-muted-foreground"}`}
-                  >
-                    {p.previewOnly ? "Anteprima" : DELIVERY_STATUS_LABEL[p.deliveryStatus]}
-                  </span>
-                  {p.crmStatus === "review" && <span className="text-xs text-muted-foreground">CRM · Da verificare</span>}
-                  {p.crmStatus === "failed" && <span className="text-xs text-destructive">CRM · Errore</span>}
-                </div>
-                <button
-                  className="text-xs text-destructive"
-                  onClick={() => deletePlace(p.id)}
-                  title="Elimina"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-4 flex items-center justify-between text-[13px] text-muted-foreground">
-          <span>{total} risultati totali</span>
-          <div className="flex items-center gap-3">
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="rounded-md border border-border px-3 py-1.5 disabled:opacity-40"
-            >
-              ← Precedente
-            </button>
-            <span>
-              Pagina {page} di {totalPages}
-            </span>
-            <button
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="rounded-md border border-border px-3 py-1.5 disabled:opacity-40"
-            >
-              Successiva →
-            </button>
-          </div>
-        </div>
-
-      </div>
+        </Drawer>
+      </>
     );
   }
 
-  return (
-    <div className="px-12 pb-12 pt-10">
-      <div className="mb-6">
-        <h1 className="mb-1.5 text-[28px] font-semibold tracking-tight">Liste</h1>
-        <p className="text-sm text-muted-foreground">
-          Configura i campi di una lista, poi collegala a una o più ricerche
-        </p>
-      </div>
-      <button
-        className="mb-5 h-10 rounded-md bg-primary px-4.5 text-sm font-semibold text-primary-foreground"
-        onClick={() => setNewListOpen(true)}
-      >
-        + Nuova lista
-      </button>
+  /* ───────────────────────── Panoramica liste ───────────────────────── */
+  const newListButton = (
+    <Button onClick={() => setNewListOpen(true)}>
+      <Plus weight="bold" aria-hidden />
+      Nuova lista
+    </Button>
+  );
 
-      {!loading && lists.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border px-5 py-10 text-center text-sm text-muted-foreground">
-          Nessuna lista ancora — creane una, oppure eseguine una da un TEST in Ricerche.
+  return (
+    <>
+      <PageHeader
+        title="Liste"
+        description="Una lista raccoglie i risultati di una o più ricerche. Qui ne configuri campi, filtri e consegna."
+        actions={newListButton}
+      />
+
+      {loading ? (
+        <div role="status" aria-label="Caricamento" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-36 rounded-lg" />
+          ))}
         </div>
+      ) : lists.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-input bg-card">
+          <EmptyState
+            icon={ListBullets}
+            title="Nessuna lista ancora"
+            description="Creane una a mano, oppure eseguine una da un test in Ricerche: verrà creata in automatico."
+            action={newListButton}
+          />
+        </div>
+      ) : (
+        <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {lists.map((l, i) => {
+            const parts = [
+              { key: "delivered", label: "consegnati", value: l.deliveredCount, className: "bg-success", text: "text-success-fg" },
+              { key: "new", label: "nuovi", value: l.newCount, className: "bg-brand", text: "text-brand" },
+              { key: "failed", label: "falliti", value: l.failedCount, className: "bg-destructive", text: "text-destructive-fg" },
+              { key: "excluded", label: "esclusi", value: l.excludedCount, className: "bg-warning", text: "text-warning-fg" },
+            ];
+            const sum = parts.reduce((s, p) => s + p.value, 0);
+            return (
+              <li key={l.id} className="rise" style={{ "--i": Math.min(i, 8) } as React.CSSProperties}>
+                <button
+                  type="button"
+                  onClick={() => openList(l.id)}
+                  className="group flex h-full w-full flex-col rounded-lg border border-border bg-card p-5 text-left shadow-panel transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-px hover:border-foreground/20 hover:shadow-pop active:scale-[0.995]"
+                >
+                  <div className="truncate text-[15px] font-semibold tracking-tight group-hover:text-brand">{l.name}</div>
+                  <div className="mt-0.5 line-clamp-1 min-h-4 text-xs text-muted-soft">{l.searchNames || "Nessuna ricerca collegata"}</div>
+
+                  <div className="num mt-5 text-[28px] font-semibold leading-none tracking-[-0.025em]">
+                    {l.total.toLocaleString("it-IT")}
+                    <span className="ml-1.5 text-[13px] font-normal tracking-normal text-muted-foreground">risultati</span>
+                  </div>
+
+                  <div
+                    role="img"
+                    aria-label={`Stato dei risultati: ${parts.map((p) => `${p.value} ${p.label}`).join(", ")}`}
+                    className="mt-4 flex h-1.5 w-full gap-0.5 overflow-hidden rounded-full bg-muted"
+                  >
+                    {sum > 0 &&
+                      parts
+                        .filter((p) => p.value > 0)
+                        .map((p) => (
+                          <div
+                            key={p.key}
+                            className={cn("h-full min-w-1", p.className)}
+                            style={{ flexGrow: (p.value / sum) * 100, flexBasis: 0 }}
+                          />
+                        ))}
+                  </div>
+                  <ul className="mt-2.5 flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
+                    {parts
+                      .filter((p) => p.value > 0)
+                      .map((p) => (
+                        <li key={p.key}>
+                          <span className={cn("num font-semibold", p.text)}>{p.value.toLocaleString("it-IT")}</span> {p.label}
+                        </li>
+                      ))}
+                  </ul>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
       )}
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
-        {lists.map((l) => (
-          <div
-            key={l.id}
-            className="cursor-pointer rounded-xl border border-border p-5"
-            onClick={() => openList(l.id)}
-          >
-            <div className="mb-1 text-base font-semibold">{l.name}</div>
-            <div className="mb-4 text-xs text-muted-soft">{l.searchNames}</div>
-            <div className="flex flex-wrap gap-4">
-              <div>
-                <div className="text-xl font-semibold">{l.total}</div>
-                <div className="text-[11px] text-muted-soft">totali</div>
-              </div>
-              <div>
-                <div className="text-xl font-semibold text-success">{l.newCount}</div>
-                <div className="text-[11px] text-muted-soft">nuovi</div>
-              </div>
-              <div>
-                <div className="text-xl font-semibold text-destructive">{l.failedCount}</div>
-                <div className="text-[11px] text-muted-soft">falliti</div>
-              </div>
-              {l.excludedCount > 0 && (
-                <div>
-                  <div className="text-xl font-semibold text-warning">{l.excludedCount}</div>
-                  <div className="text-[11px] text-muted-soft">esclusi</div>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
       <NewListDrawer open={newListOpen} onClose={() => setNewListOpen(false)} onCreated={loadOverview} />
-    </div>
+    </>
   );
 }

@@ -1,8 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { Plus, X } from "@phosphor-icons/react";
 import { Drawer } from "@/components/ui/drawer";
-import { Field, inputClass, selectClass } from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
+import { Field, Input, inputClass, selectClass } from "@/components/ui/field";
+import { useToast } from "@/components/ui/toast";
 
 const ATTR_TYPES = ["text", "number", "date", "boolean", "select"] as const;
 
@@ -15,17 +18,20 @@ export function NewListDrawer({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const toast = useToast();
   const [name, setName] = useState("");
   const [attrs, setAttrs] = useState<{ name: string; type: string }[]>([]);
   const [attrName, setAttrName] = useState("");
   const [attrType, setAttrType] = useState<string>("text");
   const [saving, setSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | undefined>();
 
   function reset() {
     setName("");
     setAttrs([]);
     setAttrName("");
     setAttrType("text");
+    setNameError(undefined);
   }
 
   function addAttr() {
@@ -36,7 +42,10 @@ export function NewListDrawer({
   }
 
   async function handleCreate() {
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      setNameError("Dai un nome alla lista.");
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch("/api/lists", {
@@ -48,9 +57,13 @@ export function NewListDrawer({
         }),
       });
       if (res.ok) {
+        toast({ title: "Lista creata", description: name.trim(), tone: "success" });
         onCreated();
         reset();
         onClose();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast({ title: "Creazione non riuscita", description: data.error, tone: "danger" });
       }
     } finally {
       setSaving(false);
@@ -58,76 +71,98 @@ export function NewListDrawer({
   }
 
   return (
-    <Drawer open={open} onClose={onClose} width={420}>
-      <h3 className="mb-6 text-[22px] font-semibold tracking-tight">Nuova lista</h3>
-      <Field label="Nome">
-        <input
-          type="text"
-          placeholder="es. Idraulici Nord Italia"
-          className={inputClass}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </Field>
+    <Drawer
+      open={open}
+      onClose={onClose}
+      width={440}
+      title="Nuova lista"
+      description="Poi la colleghi a una o più ricerche."
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Annulla
+          </Button>
+          <Button loading={saving} onClick={handleCreate}>
+            Crea lista
+          </Button>
+        </div>
+      }
+    >
+      <div className="grid gap-6 p-6">
+        <Field label="Nome" error={nameError}>
+          <Input
+            type="text"
+            autoFocus
+            placeholder="es. Idraulici Nord Italia"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setNameError(undefined);
+            }}
+          />
+        </Field>
 
-      <div className="mb-2.5 text-[13px] font-medium">Campi personalizzati (nessuno di default)</div>
-      <div className="mb-3.5 flex flex-col gap-2">
-        {attrs.map((a, i) => (
-          <div
-            key={i}
-            className="flex items-center justify-between rounded-md border border-border bg-muted px-3 py-2"
-          >
-            <span className="text-[13px] font-medium">{a.name}</span>
-            <button
-              type="button"
-              className="text-xs text-destructive"
-              onClick={() => setAttrs((list) => list.filter((_, idx) => idx !== i))}
+        <div>
+          <div className="text-[13px] font-medium">Campi personalizzati</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">Facoltativi: nessuno è creato di default.</p>
+
+          {attrs.length > 0 && (
+            <ul className="mt-3 grid gap-1.5">
+              {attrs.map((a, i) => (
+                <li
+                  key={i}
+                  className="flex items-center justify-between rounded-md border border-border bg-muted/60 py-1.5 pl-3 pr-1.5"
+                >
+                  <span className="text-[13px] font-medium">
+                    {a.name}
+                    <span className="ml-2 font-mono text-xs font-normal text-muted-soft">{a.type}</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`Rimuovi ${a.name}`}
+                    onClick={() => setAttrs((list) => list.filter((_, idx) => idx !== i))}
+                  >
+                    <X weight="bold" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="mt-3 flex gap-2">
+            <input
+              type="text"
+              aria-label="Nome del campo personalizzato"
+              placeholder="Nome campo"
+              className={`${inputClass} flex-1`}
+              value={attrName}
+              onChange={(e) => setAttrName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addAttr();
+                }
+              }}
+            />
+            <select
+              aria-label="Tipo del campo"
+              className={`${selectClass} w-28`}
+              value={attrType}
+              onChange={(e) => setAttrType(e.target.value)}
             >
-              Rimuovi
-            </button>
+              {ATTR_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <Button variant="outline" onClick={addAttr} disabled={!attrName.trim()}>
+              <Plus weight="bold" aria-hidden />
+              Aggiungi
+            </Button>
           </div>
-        ))}
-      </div>
-      <div className="mb-7 flex gap-2">
-        <input
-          type="text"
-          placeholder="Nome campo custom"
-          className={`${inputClass} flex-1`}
-          value={attrName}
-          onChange={(e) => setAttrName(e.target.value)}
-        />
-        <select className={selectClass} style={{ width: 110 }} value={attrType} onChange={(e) => setAttrType(e.target.value)}>
-          {ATTR_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={addAttr}
-          className="rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground"
-        >
-          Aggiungi
-        </button>
-      </div>
-
-      <div className="flex gap-3">
-        <button
-          type="button"
-          disabled={saving}
-          onClick={handleCreate}
-          className="h-10 flex-1 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
-        >
-          Crea lista
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="h-10 flex-1 rounded-md border border-border bg-background text-sm font-semibold"
-        >
-          Annulla
-        </button>
+        </div>
       </div>
     </Drawer>
   );
