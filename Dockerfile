@@ -9,11 +9,14 @@ COPY package.json package-lock.json ./
 COPY worker/package.json ./worker/package.json
 RUN npm ci
 
-FROM base AS builder
+FROM base AS migrate
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY prisma ./prisma
 RUN npx prisma generate
+
+FROM migrate AS builder
+COPY . .
 RUN npm run build
 
 FROM base AS runner

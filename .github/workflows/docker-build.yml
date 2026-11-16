@@ -27,9 +27,7 @@ jobs:
           push: true
           tags: ghcr.io/dariodecc/lead-scraper-web:latest
 
-  # Immagine "migrate": stesso Dockerfile del web, ma fermata allo stage builder — ha node_modules
-  # completo (incluso il CLI prisma, che nell'immagine web standalone non c'è, essendo una
-  # devDependency non tracciata da `next build`). Usata solo per `prisma db push` a ogni deploy.
+  # Lo stage migrate include Prisma e lo schema, senza compilare Next.js.
   build-migrate:
     runs-on: ubuntu-latest
     steps:
@@ -44,7 +42,7 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          target: builder
+          target: migrate
           push: true
           tags: ghcr.io/dariodecc/lead-scraper-migrate:latest
 
